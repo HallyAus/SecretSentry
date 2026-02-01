@@ -1,0 +1,15 @@
+scan_now:
+  name: Scan Now
+  description: Trigger an immediate security scan of the Home Assistant configuration.
+
+export_report:
+  name: Export Report
+  description: Export a masked JSON report of all findings to /config/secretsentry_report.json. Secrets are never included in plain text.
+
+export_sanitised_copy:
+  name: Export Sanitised Copy
+  description: Create a sanitised copy of configuration files with secrets replaced by ***REDACTED***. Output is saved to /config/secretsentry_sanitised/.
+
+run_selftest:
+  name: Run Self-Test
+  description: Run internal self-tests to verify the scanner is working correctly. Results are displayed as a persistent notification.

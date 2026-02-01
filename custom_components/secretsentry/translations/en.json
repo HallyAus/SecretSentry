@@ -1,0 +1,159 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set Up SecretSentry",
+        "description": "SecretSentry scans your Home Assistant configuration for potential security issues like exposed secrets, insecure settings, and git hygiene problems.\n\n**Safety Note:** This integration performs ONLY local scanning. It does not connect to the internet, enumerate other instances, or use external services.\n\nClick Submit to set up SecretSentry with default settings. You can configure options after setup."
+      }
+    },
+    "abort": {
+      "already_configured": "SecretSentry is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SecretSentry Options",
+        "description": "Configure scanning options for SecretSentry.",
+        "data": {
+          "scan_interval": "Automatic Scan Interval",
+          "enable_snapshot_scan": "Scan backup archives",
+          "enable_git_subprocess_checks": "Enable git subprocess checks",
+          "enable_secret_age": "Check secret age metadata",
+          "enable_external_url_self_check": "Enable external URL self-check"
+        },
+        "data_description": {
+          "scan_interval": "How often to automatically scan for security issues",
+          "enable_snapshot_scan": "Scan .tar and .zip files in backup directories for secrets",
+          "enable_git_subprocess_checks": "Run git commands to check if secrets.yaml is tracked (requires git)",
+          "enable_secret_age": "Check for old secrets based on date comments in secrets.yaml",
+          "enable_external_url_self_check": "Check YOUR OWN external URL for security issues"
+        }
+      },
+      "external_url": {
+        "title": "External URL Configuration",
+        "description": "Enter YOUR external URL to check. This will ONLY check the URL you provide - no other systems are scanned.",
+        "data": {
+          "external_url": "Your External URL"
+        },
+        "data_description": {
+          "external_url": "The external URL of YOUR Home Assistant instance (e.g., https://myhome.duckdns.org)"
+        }
+      },
+      "advanced": {
+        "title": "Advanced Options",
+        "description": "Configure advanced scanning limits.",
+        "data": {
+          "max_file_size_kb": "Maximum file size",
+          "max_total_scan_mb": "Maximum total scan size",
+          "max_findings": "Maximum findings"
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Invalid URL format. Please enter a valid URL."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_findings": {
+        "name": "Total Security Findings"
+      },
+      "high_severity_findings": {
+        "name": "High Severity Findings"
+      }
+    }
+  },
+  "issues": {
+    "r001": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r002": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r003": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r004": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r005": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r010": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r011": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r012": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r020": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r021": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r022": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r023": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r030": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r040": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r050": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r060": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r070": {
+      "title": "{title}",
+      "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r071": {
+      "title": "{title}",
+      "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    }
+  },
+  "services": {
+    "scan_now": {
+      "name": "Scan Now",
+      "description": "Trigger an immediate security scan of the Home Assistant configuration."
+    },
+    "export_report": {
+      "name": "Export Report",
+      "description": "Export a masked JSON report of all findings to /config/secretsentry_report.json."
+    },
+    "export_sanitised_copy": {
+      "name": "Export Sanitised Copy",
+      "description": "Create a sanitised copy of configuration files with secrets replaced by ***REDACTED***."
+    },
+    "run_selftest": {
+      "name": "Run Self-Test",
+      "description": "Run internal self-tests to verify the scanner is working correctly."
+    }
+  }
+}
