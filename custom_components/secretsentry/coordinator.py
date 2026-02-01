@@ -265,45 +265,107 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
     async def _update_repairs(self, data: SecretSentryData) -> None:
         """Update repair issues based on scan results.
 
-        Creates new repair issues for new findings and removes
-        resolved issues.
+        Uses grouped findings to reduce spam and improve readability.
+        Creates repair issues with descriptive titles and actionable descriptions.
 
         Args:
             data: Current scan data.
         """
         from homeassistant.helpers import issue_registry as ir
 
-        # Create issues for new findings
-        for fingerprint in data.new_fingerprints:
-            # Find the finding with this fingerprint
-            finding = next(
-                (f for f in data.findings if f.fingerprint == fingerprint),
-                None
-            )
-            if not finding:
+        from .repairs import (
+            create_summary_finding,
+            group_findings,
+        )
+
+        # Group findings by (rule_id, file_path, key_name)
+        grouped = group_findings(data.findings)
+
+        # Get current grouped fingerprints
+        current_group_fps = set(grouped.keys())
+
+        # Track which old fingerprints we've seen for migration
+        if not hasattr(self, "_last_group_fingerprints"):
+            self._last_group_fingerprints: set[str] = set()
+
+        # New groups to create issues for
+        new_group_fps = current_group_fps - self._last_group_fingerprints
+
+        # Resolved groups to delete issues for
+        resolved_group_fps = self._last_group_fingerprints - current_group_fps
+
+        # Privacy mode for descriptions
+        privacy_mode = self.config_entry.options.get("privacy_mode_reports", True)
+
+        # Create issues for new grouped findings
+        for group_fp in new_group_fps:
+            group = grouped.get(group_fp)
+            if not group:
                 continue
 
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                fingerprint,
-                is_fixable=False,
-                is_persistent=True,
-                severity=self._map_severity_to_ir(finding.severity),
-                translation_key=finding.rule_id.lower(),
-                translation_placeholders={
-                    "title": finding.title,
-                    "file_path": finding.file_path,
-                    "line": str(finding.line) if finding.line else "N/A",
-                    "evidence": finding.evidence_masked or "N/A",
-                    "recommendation": finding.recommendation,
-                    "description": finding.description,
-                },
-            )
+            try:
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    group_fp,
+                    is_fixable=False,
+                    is_persistent=True,
+                    severity=self._map_severity_to_ir(group.severity),
+                    translation_key=group.rule_id.lower(),
+                    translation_placeholders={
+                        "title": group.format_title(),
+                        "file_path": group.file_path,
+                        "line": str(group.first_line) if group.first_line else "N/A",
+                        "evidence": group.occurrences[0][1] if group.occurrences else "N/A",
+                        "recommendation": group.format_description(privacy_mode),
+                        "description": group._get_why_text(),
+                    },
+                )
+            except Exception as err:
+                _LOGGER.debug("Failed to create repair issue: %s", err)
 
         # Remove resolved issues
-        for fingerprint in data.resolved_fingerprints:
-            ir.async_delete_issue(self.hass, DOMAIN, fingerprint)
+        for group_fp in resolved_group_fps:
+            try:
+                ir.async_delete_issue(self.hass, DOMAIN, group_fp)
+            except Exception as err:
+                _LOGGER.debug("Failed to delete repair issue: %s", err)
+
+        # Update/create summary issue
+        if data.findings:
+            try:
+                summary = create_summary_finding(
+                    high_count=data.high_count,
+                    med_count=data.med_count,
+                    low_count=data.low_count,
+                    last_scan=data.last_scan.isoformat(),
+                    top_titles=data.get_top_findings(5),
+                )
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    summary["fingerprint"],
+                    is_fixable=False,
+                    is_persistent=True,
+                    severity=ir.IssueSeverity.WARNING if data.high_count > 0 else ir.IssueSeverity.WARNING,
+                    learn_more_url="https://github.com/secretsentry/secretsentry",
+                    translation_key="summary",
+                    translation_placeholders={
+                        "title": summary["title"],
+                        "description": summary["description"],
+                    },
+                )
+            except Exception as err:
+                _LOGGER.debug("Failed to create summary issue: %s", err)
+        else:
+            # No findings - remove summary
+            try:
+                ir.async_delete_issue(self.hass, DOMAIN, "secretsentry_summary")
+            except Exception:
+                pass
+
+        # Update tracked fingerprints
+        self._last_group_fingerprints = current_group_fps
 
     @staticmethod
     def _map_severity_to_ir(severity: str) -> "ir.IssueSeverity":

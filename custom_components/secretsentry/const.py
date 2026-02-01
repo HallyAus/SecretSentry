@@ -275,3 +275,22 @@ HTTP_CHECK_MAX_CONTENT: Final = 1024  # bytes to read for response check
 # v3.0: Privacy mode tokenization prefix
 PRIVACY_TOKEN_PREFIX: Final = "host_"
 PRIVACY_IP_MASK: Final = "x.x.x.x"
+
+# Default options dictionary for config entry options
+# Used to merge with user options to ensure all keys exist
+DEFAULT_OPTIONS: Final[dict[str, any]] = {
+    CONF_SCAN_INTERVAL: "daily",
+    CONF_PRIVACY_MODE_REPORTS: True,
+    CONF_ENABLE_ENV_HYGIENE: True,
+    CONF_ENABLE_LOG_SCAN: False,
+    CONF_ENABLE_SNAPSHOT_SCAN: False,
+    CONF_ENABLE_GIT_CHECKS: False,
+    CONF_ENABLE_SECRET_AGE: False,
+    CONF_ENABLE_EXTERNAL_CHECK: False,
+    CONF_EXTERNAL_URL: "",
+    CONF_MAX_FILE_SIZE_KB: 512,
+    CONF_MAX_TOTAL_SCAN_MB: 50,
+    CONF_MAX_FINDINGS: 500,
+    CONF_MAX_LOG_SCAN_MB: 10,
+    CONF_MAX_LOG_LINES: 50000,
+}

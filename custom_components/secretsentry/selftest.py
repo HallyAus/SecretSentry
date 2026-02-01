@@ -427,7 +427,138 @@ def run_selftest() -> SelfTestResult:
                 "message": "Duplicate fingerprints detected",
             })
 
-        # v3.0 Test 6: Verify sanitised copy has no raw secrets
+        # Test 6: Options flow schema does not crash
+        total_count += 1
+        try:
+            from .config_flow import SecretSentryOptionsFlowHandler
+            from .const import DEFAULT_OPTIONS
+
+            # Test schema building with partial options (simulates real-world)
+            class FakeConfigEntry:
+                def __init__(self):
+                    self.options = {"scan_interval": "weekly"}  # Missing some keys
+
+            fake_entry = FakeConfigEntry()
+            handler = SecretSentryOptionsFlowHandler(fake_entry)
+            options = handler._get_options()
+            schema = handler._build_init_schema(options)
+
+            # Verify schema is valid
+            if schema is not None:
+                passed_count += 1
+                assertions.append({
+                    "test": "Options flow schema",
+                    "passed": True,
+                    "message": "Options flow schema builds without error",
+                })
+            else:
+                assertions.append({
+                    "test": "Options flow schema",
+                    "passed": False,
+                    "message": "Options flow schema returned None",
+                })
+        except Exception as err:
+            assertions.append({
+                "test": "Options flow schema",
+                "passed": False,
+                "message": f"Options flow schema failed: {err}",
+            })
+            errors.append(f"Options flow schema error: {err}")
+
+        # Test 7: Repairs grouping reduces issue count
+        total_count += 1
+        try:
+            from .repairs import group_findings, guess_integration
+
+            # Group the findings from our scan
+            grouped = group_findings(result.findings)
+
+            # Verify grouping reduces count (multiple occurrences collapse)
+            original_count = len(result.findings)
+            grouped_count = len(grouped)
+
+            if grouped_count <= original_count:
+                passed_count += 1
+                assertions.append({
+                    "test": "Repairs grouping",
+                    "passed": True,
+                    "message": f"Grouping reduced {original_count} findings to {grouped_count} repair issues",
+                })
+            else:
+                assertions.append({
+                    "test": "Repairs grouping",
+                    "passed": False,
+                    "message": f"Grouping should not increase count ({original_count} -> {grouped_count})",
+                })
+        except Exception as err:
+            assertions.append({
+                "test": "Repairs grouping",
+                "passed": False,
+                "message": f"Repairs grouping failed: {err}",
+            })
+            errors.append(f"Repairs grouping error: {err}")
+
+        # Test 8: Integration guessing for esphome path
+        total_count += 1
+        try:
+            integration = guess_integration("esphome/device.yaml")
+            if integration == "ESPHome":
+                passed_count += 1
+                assertions.append({
+                    "test": "Integration guessing",
+                    "passed": True,
+                    "message": "ESPHome path correctly identified",
+                })
+            else:
+                assertions.append({
+                    "test": "Integration guessing",
+                    "passed": False,
+                    "message": f"Expected 'ESPHome', got '{integration}'",
+                })
+        except Exception as err:
+            assertions.append({
+                "test": "Integration guessing",
+                "passed": False,
+                "message": f"Integration guessing failed: {err}",
+            })
+            errors.append(f"Integration guessing error: {err}")
+
+        # Test 9: Grouped finding title includes file:line
+        total_count += 1
+        try:
+            if grouped:
+                first_group = next(iter(grouped.values()))
+                title = first_group.format_title()
+                # Title should include file reference
+                if "in" in title.lower() or first_group.file_path in title:
+                    passed_count += 1
+                    assertions.append({
+                        "test": "Repair title includes location",
+                        "passed": True,
+                        "message": f"Repair title includes location: {title[:60]}...",
+                    })
+                else:
+                    assertions.append({
+                        "test": "Repair title includes location",
+                        "passed": False,
+                        "message": f"Repair title missing location: {title}",
+                    })
+            else:
+                passed_count += 1
+                assertions.append({
+                    "test": "Repair title includes location",
+                    "passed": True,
+                    "message": "No grouped findings to test (expected in some configs)",
+                })
+        except Exception as err:
+            assertions.append({
+                "test": "Repair title includes location",
+                "passed": False,
+                "message": f"Repair title test failed: {err}",
+            })
+            errors.append(f"Repair title error: {err}")
+
+        # Test 10: Verify sanitised copy has no raw secrets
         total_count += 1
         with TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)

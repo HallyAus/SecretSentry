@@ -1,5 +1,7 @@
 # SecretSentry
 
+![SecretSentry](logo.png)
+
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -232,6 +234,15 @@ automation:
 ```
 
 ## Troubleshooting
+
+### Config Flow 500 Error
+
+If clicking the gear icon (options) shows "Config flow could not be loaded: 500":
+
+1. Check Settings -> System -> Logs and search for "secretsentry" or "config_flow"
+2. Common cause is import errors in config_flow.py
+3. Try removing and re-adding the integration
+4. Restart Home Assistant after any updates
 
 ### Running Self-Test
 

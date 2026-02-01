@@ -69,7 +69,8 @@
       }
     },
     "error": {
-      "invalid_url": "Invalid URL format. Please enter a valid URL."
+      "invalid_url": "Invalid URL format. Please enter a valid URL.",
+      "unknown": "An unexpected error occurred. Check the logs for details."
     }
   },
   "entity": {
@@ -178,6 +179,10 @@
     "r093": {
       "title": "{title}",
       "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "summary": {
+      "title": "{title}",
+      "description": "{description}"
     }
   },
   "services": {

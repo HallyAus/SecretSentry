@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Background circle (subtle scan ring) -->
+  <circle cx="128" cy="128" r="120" fill="none" stroke="#3b82f6" stroke-width="4" stroke-dasharray="20,10" opacity="0.3"/>
+
+  <!-- Shield body -->
+  <path d="M128 20 L220 60 L220 140 C220 200 128 240 128 240 C128 240 36 200 36 140 L36 60 Z"
+        fill="#1e40af" stroke="#3b82f6" stroke-width="4"/>
+
+  <!-- Keyhole circle -->
+  <circle cx="128" cy="110" r="28" fill="#93c5fd"/>
+
+  <!-- Keyhole slot -->
+  <path d="M118 130 L138 130 L145 180 L111 180 Z" fill="#93c5fd"/>
+</svg>
