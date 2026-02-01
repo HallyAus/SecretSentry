@@ -278,19 +278,15 @@ PRIVACY_IP_MASK: Final = "x.x.x.x"
 
 # Default options dictionary for config entry options
 # Used to merge with user options to ensure all keys exist
+# Uses string keys to match what OptionsFlow receives
 DEFAULT_OPTIONS: Final[dict[str, any]] = {
-    CONF_SCAN_INTERVAL: "daily",
-    CONF_PRIVACY_MODE_REPORTS: True,
-    CONF_ENABLE_ENV_HYGIENE: True,
-    CONF_ENABLE_LOG_SCAN: False,
-    CONF_ENABLE_SNAPSHOT_SCAN: False,
-    CONF_ENABLE_GIT_CHECKS: False,
-    CONF_ENABLE_SECRET_AGE: False,
-    CONF_ENABLE_EXTERNAL_CHECK: False,
-    CONF_EXTERNAL_URL: "",
-    CONF_MAX_FILE_SIZE_KB: 512,
-    CONF_MAX_TOTAL_SCAN_MB: 50,
-    CONF_MAX_FINDINGS: 500,
-    CONF_MAX_LOG_SCAN_MB: 10,
-    CONF_MAX_LOG_LINES: 50000,
+    "privacy_mode_reports": True,
+    "enable_log_scan": False,
+    "enable_env_hygiene": True,
+    "scan_interval": "daily",
+    "include_paths": [],
+    "exclude_paths": [".storage", "deps", "tts", "www", "media", "backups", "backup", "logs", "__pycache__"],
+    "max_file_size_kb": 512,
+    "max_total_scan_mb": 50,
+    "max_findings": 500,
 }
