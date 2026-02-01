@@ -20,14 +20,20 @@
           "enable_snapshot_scan": "Scan backup archives",
           "enable_git_subprocess_checks": "Enable git subprocess checks",
           "enable_secret_age": "Check secret age metadata",
-          "enable_external_url_self_check": "Enable external URL self-check"
+          "enable_external_url_self_check": "Enable external URL self-check",
+          "privacy_mode_reports": "Privacy mode for reports",
+          "enable_env_hygiene": "Environment file hygiene checks",
+          "enable_log_scan": "Scan log files for secrets"
         },
         "data_description": {
           "scan_interval": "How often to automatically scan for security issues",
           "enable_snapshot_scan": "Scan .tar and .zip files in backup directories for secrets",
           "enable_git_subprocess_checks": "Run git commands to check if secrets.yaml is tracked (requires git)",
           "enable_secret_age": "Check for old secrets based on date comments in secrets.yaml",
-          "enable_external_url_self_check": "Check YOUR OWN external URL for security issues"
+          "enable_external_url_self_check": "Check YOUR OWN external URL for security issues",
+          "privacy_mode_reports": "Mask private IPs and tokenize hostnames in exported reports",
+          "enable_env_hygiene": "Scan .env and docker-compose.yml files for secrets",
+          "enable_log_scan": "Scan Home Assistant log files for leaked secrets (may be slow for large logs)"
         }
       },
       "external_url": {
@@ -38,6 +44,18 @@
         },
         "data_description": {
           "external_url": "The external URL of YOUR Home Assistant instance (e.g., https://myhome.duckdns.org)"
+        }
+      },
+      "log_scan": {
+        "title": "Log Scanning Options",
+        "description": "Configure log file scanning limits to prevent performance issues.",
+        "data": {
+          "max_log_scan_mb": "Maximum log file size",
+          "max_log_lines": "Maximum lines to scan"
+        },
+        "data_description": {
+          "max_log_scan_mb": "Skip log files larger than this size (MB)",
+          "max_log_lines": "Stop scanning after this many lines"
         }
       },
       "advanced": {
@@ -84,6 +102,10 @@
     "r005": {
       "title": "{title}",
       "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r008": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     },
     "r010": {
       "title": "{title}",
@@ -136,6 +158,26 @@
     "r071": {
       "title": "{title}",
       "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r080": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r090": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r091": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r092": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r093": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     }
   },
   "services": {
@@ -145,15 +187,15 @@
     },
     "export_report": {
       "name": "Export Report",
-      "description": "Export a masked JSON report of all findings to /config/secretsentry_report.json."
+      "description": "Export a masked JSON report of all findings to /config/secretsentry_report.json. If privacy mode is enabled, IPs and hostnames will also be tokenized."
     },
     "export_sanitised_copy": {
       "name": "Export Sanitised Copy",
-      "description": "Create a sanitised copy of configuration files with secrets replaced by ***REDACTED***."
+      "description": "Create a sanitised copy of configuration files with secrets replaced by ***REDACTED***. URLs with credentials are also redacted."
     },
     "run_selftest": {
       "name": "Run Self-Test",
-      "description": "Run internal self-tests to verify the scanner is working correctly."
+      "description": "Run internal self-tests to verify the scanner is working correctly. Tests all rules, masking, and export functionality."
     }
   }
 }

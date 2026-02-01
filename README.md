@@ -1,28 +1,39 @@
 # SecretSentry
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Local security scanner for Home Assistant configurations.**
 
 SecretSentry scans your Home Assistant configuration directory for potential security issues, including exposed credentials, insecure settings, git hygiene problems, and missing security best practices.
 
-## Important Safety Note
+## Security Model
 
-**SecretSentry performs ONLY local scanning.** It does NOT:
+**SecretSentry is LOCAL ONLY.** Your secrets never leave your system.
 
-- Connect to the internet for any scanning purposes
-- Enumerate other Home Assistant instances
-- Use external services like Shodan or any registry lookups
-- Send any data outside your local network
-- Perform any network scanning or enumeration
+| Feature | Guarantee |
+|---------|-----------|
+| **Local Execution** | All scanning runs locally on your HA instance |
+| **No Telemetry** | Zero analytics, tracking, or data collection |
+| **No Outbound** | No connections except optional external URL self-check (YOUR URL only) |
+| **Secret Masking** | Raw secrets NEVER logged, stored, or displayed |
+| **Privacy Mode** | Reports can mask private IPs and tokenize hostnames |
 
-All scanning is performed locally against your `/config` directory. Your secrets and configuration data never leave your system.
-
-The **only** network feature is the optional "External URL Self-Check" which checks YOUR OWN configured external URL - no other systems are ever contacted.
+See [SECURITY.md](SECURITY.md) for complete security documentation.
 
 ## Features
 
-- **15+ Security Rules**: Comprehensive checks across 8 categories
+### v3.0 Highlights
+
+- **Log Scanning**: Detect secrets leaked into log files
+- **Environment Hygiene**: Scan .env and docker-compose.yml for secrets
+- **URL Userinfo Detection**: Find credentials embedded in URLs (scheme://user:pass@host)
+- **Privacy Mode**: Mask IPs and tokenize hostnames in exported reports
+- **Enhanced Self-Test**: Verify masking in evidence, exports, and sanitised copies
+
+### Core Features
+
+- **20+ Security Rules**: Comprehensive checks across 10 categories
 - **Delta Scanning**: Track new and resolved findings between scans
 - **Repairs Integration**: Findings appear in Home Assistant's Repairs dashboard
 - **Evidence Masking**: All secrets are automatically masked in logs and reports
@@ -32,8 +43,6 @@ The **only** network feature is the optional "External URL Self-Check" which che
 - **External URL Self-Check**: Verify your own instance's HTTPS and auth status
 - **Built-in Self-Test**: Verify the scanner is working correctly
 - **Sanitised Export**: Create redacted copies of configuration for sharing
-- **Two Sensors**: Monitor total findings and high-severity findings
-- **Export Reports**: Generate masked JSON reports for review
 
 ## Installation
 
@@ -58,11 +67,12 @@ The **only** network feature is the optional "External URL Self-Check" which che
 
 ## Configuration Options
 
-After setup, configure options through the integration's configuration page:
-
 ### Basic Options
 
-- **Scan Interval**: How often to scan (5 minutes to 24 hours, default: 1 hour)
+- **Scan Interval**: Disabled, Daily, or Weekly
+- **Privacy Mode Reports**: Mask private IPs and hostnames in exports (default: ON)
+- **Environment Hygiene**: Scan .env and docker-compose files (default: ON)
+- **Log Scanning**: Scan log files for leaked secrets (default: OFF)
 - **Scan Backup Archives**: Scan .tar and .zip files in backup directories
 - **Enable Git Subprocess Checks**: Check if secrets.yaml is tracked in git
 - **Check Secret Age Metadata**: Detect old secrets based on date comments
@@ -70,132 +80,110 @@ After setup, configure options through the integration's configuration page:
 
 ### Advanced Options
 
-- **Maximum File Size**: Skip files larger than this (default: 5MB)
-- **Maximum Total Scan Size**: Stop scanning after this total (default: 100MB)
+- **Maximum File Size**: Skip files larger than this (default: 512KB)
+- **Maximum Total Scan Size**: Stop scanning after this total (default: 50MB)
 - **Maximum Findings**: Limit total findings per scan (default: 500)
+- **Maximum Log Size**: Limit for log file scanning (default: 10MB)
+- **Maximum Log Lines**: Stop after this many log lines (default: 50000)
 
 ## Security Rules
 
 ### Group 1: Credential Leak Detection
 
-#### R001: Inline Secrets Detected
-**Severity: High**
-
-Detects sensitive configuration keys (api_key, token, password, client_secret, private_key, bearer, webhook, etc.) that contain hardcoded values instead of using `!secret` references.
-
-```yaml
-# BAD - will be flagged
-api_key: abc123secretkey
-
-# GOOD - uses secret reference
-api_key: !secret my_api_key
-```
-
-#### R002: JWT Token Detected
-**Severity: High**
-
-Detects JSON Web Tokens (JWTs) in configuration files.
-
-#### R003: PEM Private Key Detected
-**Severity: High**
-
-Detects PEM-encoded private key blocks in configuration files.
-
-#### R004: Missing Secret Reference
-**Severity: Medium**
-
-Detects `!secret` references that point to keys not defined in `secrets.yaml`.
-
-#### R005: Secret Duplication
-**Severity: Medium**
-
-Flags when the same secret value appears in multiple places, increasing leak risk.
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R001 | HIGH | Inline secrets (api_key, token, password, etc.) |
+| R002 | HIGH | JWT tokens in configuration |
+| R003 | HIGH | PEM private key blocks |
+| R004 | MED | Missing !secret references |
+| R005 | MED | Duplicate secret values |
+| R008 | HIGH | URL with credentials (user:pass@host) |
 
 ### Group 2: Git Hygiene
 
-#### R010: Gitignore Missing
-**Severity: Medium**
-
-No `.gitignore` file found in config directory.
-
-#### R011: Gitignore Weak
-**Severity: Medium**
-
-`.gitignore` is missing critical entries like `secrets.yaml`, `.storage/`, or `*.db`.
-
-#### R012: Secrets Tracked in Git
-**Severity: High**
-
-`secrets.yaml` is being tracked by git (requires git subprocess checks enabled).
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R010 | MED | Missing .gitignore |
+| R011 | MED | Weak .gitignore (missing critical entries) |
+| R012 | HIGH | secrets.yaml tracked in git |
 
 ### Group 3: HTTP/Proxy Security
 
-#### R020: IP Ban Disabled
-**Severity: Medium**
-
-`ip_ban_enabled` is set to false in HTTP configuration.
-
-#### R021: Login Attempts Threshold Missing
-**Severity: Low**
-
-No `login_attempts_threshold` configured for rate limiting.
-
-#### R022: Broad Trusted Proxies
-**Severity: High**
-
-Overly permissive `trusted_proxies` like `0.0.0.0/0` that trust all IPs.
-
-#### R023: SSL Not Enforced
-**Severity: Medium**
-
-External access configured without SSL enforcement.
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R020 | MED | IP ban disabled |
+| R021 | HIGH | Broad trusted proxies (0.0.0.0/0) |
+| R022 | HIGH | CORS wildcard origin |
+| R023 | LOW | External exposure hints |
 
 ### Group 4: Webhooks
 
-#### R030: Unprotected Webhooks
-**Severity: Medium**
-
-Webhook IDs that are too short or predictable.
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R030 | MED | Short or predictable webhook IDs |
 
 ### Group 5: Storage Security
 
-#### R040: Plaintext Credentials in Storage
-**Severity: High**
-
-Credentials stored in plaintext in `.storage/` files.
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R040 | LOW | .storage directory advisory |
 
 ### Group 6: Snapshot/Backup Scanning
 
-#### R050: Secrets in Backup Archives
-**Severity: High**
-
-Secrets found in backup .tar or .zip files (requires snapshot scanning enabled).
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R050 | HIGH | Secrets in backup archives |
 
 ### Group 7: Secret Age
 
-#### R060: Stale Secrets
-**Severity: Low**
-
-Secrets older than 365 days based on date comments in secrets.yaml.
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R060 | MED | Old secrets needing rotation |
 
 ### Group 8: External URL Checks
 
-#### R070: External URL Not HTTPS
-**Severity: High**
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R070 | HIGH | External URL not using HTTPS |
+| R071 | HIGH | External API accessible without auth |
 
-Your external URL is not using HTTPS.
+### Group 9: Log Scanning (v3.0)
 
-#### R071: External API Unauthenticated
-**Severity: High**
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R080 | HIGH | Secrets leaked into log files |
 
-Your external URL's API endpoint is accessible without authentication.
+### Group 10: Environment Hygiene (v3.0)
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| R090 | LOW | .env file present (advisory) |
+| R091 | MED/HIGH | Secrets in .env files |
+| R092 | MED | Secrets in docker-compose.yml |
+| R093 | LOW/MED | Add-on config export risk |
+
+## Services
+
+### `secretsentry.scan_now`
+Triggers an immediate security scan.
+
+### `secretsentry.export_report`
+Exports a masked JSON report to `/config/secretsentry_report.json`.
+
+### `secretsentry.export_sanitised_copy`
+Creates a sanitised copy of configuration files with secrets replaced by `***REDACTED***`. Output is saved to `/config/secretsentry_sanitised/`.
+
+### `secretsentry.run_selftest`
+Runs internal self-tests to verify the scanner is working correctly. Tests include:
+- All rule detection
+- Secret masking in evidence
+- Secret masking in exports
+- Sanitised copy verification
 
 ## Sensors
 
 ### Total Security Findings
 `sensor.secretsentry_total_findings`
-
-Shows the total number of security findings across all severity levels.
 
 **Attributes:**
 - `med_count`: Medium severity count
@@ -209,56 +197,16 @@ Shows the total number of security findings across all severity levels.
 ### High Severity Findings
 `sensor.secretsentry_high_severity_findings`
 
-Shows the count of high severity findings.
+## Privacy Mode
 
-**Attributes:**
-- `new_high_count`: New high findings since last scan
-- `findings`: List of high severity findings (limited to first 10)
+When `privacy_mode_reports` is enabled (default: ON), exported reports and sanitised copies will:
 
-## Services
+- Replace private IPs with tokens (`private_ip_1`, `private_ip_2`, etc.)
+- Tokenize hostnames consistently within an export
+- Preserve file paths and line numbers for debugging
+- Maintain consistent tokens so relationships are visible
 
-### `secretsentry.scan_now`
-
-Triggers an immediate security scan.
-
-```yaml
-service: secretsentry.scan_now
-```
-
-### `secretsentry.export_report`
-
-Exports a masked JSON report to `/config/secretsentry_report.json`.
-
-```yaml
-service: secretsentry.export_report
-```
-
-### `secretsentry.export_sanitised_copy`
-
-Creates a sanitised copy of configuration files with secrets replaced by `***REDACTED***`. Output is saved to `/config/secretsentry_sanitised/`.
-
-```yaml
-service: secretsentry.export_sanitised_copy
-```
-
-### `secretsentry.run_selftest`
-
-Runs internal self-tests to verify the scanner is working correctly. Results are displayed as a persistent notification.
-
-```yaml
-service: secretsentry.run_selftest
-```
-
-## Repairs Integration
-
-All findings appear in Home Assistant's Repairs dashboard (Settings → System → Repairs). Each finding includes:
-
-- Rule ID and severity
-- File path and line number
-- Masked evidence (secrets are never shown in plain text)
-- Remediation recommendations
-
-When you fix an issue and the next scan runs, the repair issue is automatically removed.
+This allows sharing reports without exposing your network topology.
 
 ## Example Automations
 
@@ -280,35 +228,8 @@ automation:
           title: "Security Alert"
           message: >
             SecretSentry found {{ state_attr('sensor.secretsentry_total_findings', 'new_high_count') }}
-            new high severity security issues. Check the Repairs dashboard.
+            new high severity security issues.
 ```
-
-### Weekly Security Scan with Report
-
-```yaml
-automation:
-  - alias: "Weekly security scan"
-    trigger:
-      - platform: time
-        at: "03:00:00"
-    condition:
-      - condition: time
-        weekday:
-          - sun
-    action:
-      - service: secretsentry.scan_now
-      - delay: "00:01:00"
-      - service: secretsentry.export_report
-```
-
-## Privacy & Security
-
-- All scanning is performed locally
-- No data is sent to external services
-- Secrets are automatically masked in all outputs using entropy-based detection
-- Reports contain only masked evidence
-- The only network connection is the optional external URL self-check of YOUR OWN instance
-- Fingerprints are used for stable finding identification without exposing content
 
 ## Troubleshooting
 
@@ -325,24 +246,21 @@ Use the `secretsentry.run_selftest` service to verify the scanner is working cor
 
 ### False Positives
 
-Some findings may be intentional (e.g., test configurations). You can:
+Some findings may be intentional. You can:
 1. Acknowledge them in the Repairs dashboard
 2. Move the values to `secrets.yaml` even if not strictly necessary
 
-### Scan Taking Too Long
-
-- Large configuration directories may take longer
-- Files in `.storage`, `deps`, and other excluded directories are automatically skipped
-- Configure the maximum file size and total scan size limits in options
-- Disable snapshot scanning if you have many large backup files
-
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) if available.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and changes.
 
 ## Disclaimer
 
