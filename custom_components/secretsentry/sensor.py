@@ -34,51 +34,37 @@ def _get_total_findings(data: SecretSentryData) -> int:
     return data.total_findings
 
 
-def _get_high_severity_count(data: SecretSentryData) -> int:
-    """Get count of high and critical severity findings."""
-    return data.high_severity_count
+def _get_high_count(data: SecretSentryData) -> int:
+    """Get count of high severity findings."""
+    return data.high_count
 
 
 def _get_findings_attributes(data: SecretSentryData) -> dict[str, Any]:
     """Get extra attributes for total findings sensor."""
     return {
-        "findings_by_severity": data.findings_by_severity,
+        "med_count": data.med_count,
+        "low_count": data.low_count,
         "last_scan": data.last_scan.isoformat() if data.last_scan else None,
         "scan_duration_seconds": data.scan_duration,
-        "findings": [
-            {
-                "rule_id": f.rule_id,
-                "severity": f.severity,
-                "title": f.title,
-                "file": f.file_path,
-                "line": f.line_number,
-            }
-            for f in data.findings[:20]  # Limit to first 20 for attributes
-        ],
+        "new_high_count": data.new_high_count,
+        "resolved_count": data.resolved_count,
+        "top_findings": data.get_top_findings(5),
     }
 
 
 def _get_high_severity_attributes(data: SecretSentryData) -> dict[str, Any]:
     """Get extra attributes for high severity sensor."""
     high_findings = [
-        f
-        for f in data.findings
-        if f.severity in (Severity.HIGH, Severity.CRITICAL)
+        f for f in data.findings if f.severity == Severity.HIGH
     ]
     return {
-        "critical_count": len(
-            [f for f in data.findings if f.severity == Severity.CRITICAL]
-        ),
-        "high_count": len(
-            [f for f in data.findings if f.severity == Severity.HIGH]
-        ),
+        "new_high_count": data.new_high_count,
         "findings": [
             {
                 "rule_id": f.rule_id,
-                "severity": f.severity,
                 "title": f.title,
                 "file": f.file_path,
-                "line": f.line_number,
+                "line": f.line,
             }
             for f in high_findings[:10]  # Limit to first 10
         ],
@@ -101,7 +87,7 @@ SENSOR_DESCRIPTIONS: tuple[SecretSentrySensorEntityDescription, ...] = (
         native_unit_of_measurement="findings",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:shield-alert",
-        value_fn=_get_high_severity_count,
+        value_fn=_get_high_count,
         extra_state_attributes_fn=_get_high_severity_attributes,
     ),
 )

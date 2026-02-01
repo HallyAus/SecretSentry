@@ -2,14 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure SecretSentry",
-        "description": "SecretSentry scans your Home Assistant configuration for potential security issues like exposed secrets, missing gitignore entries, and insecure HTTP settings.\n\nDefault scan interval is {default_interval} minutes.",
-        "data": {
-          "scan_interval": "Scan interval (seconds)"
-        },
-        "data_description": {
-          "scan_interval": "How often to scan for security issues (300-86400 seconds)"
-        }
+        "title": "Set Up SecretSentry",
+        "description": "SecretSentry scans your Home Assistant configuration for potential security issues like exposed secrets, insecure settings, and git hygiene problems.\n\n**Safety Note:** This integration performs ONLY local scanning. It does not connect to the internet, enumerate other instances, or use external services.\n\nClick Submit to set up SecretSentry with default settings. You can configure options after setup."
       }
     },
     "abort": {
@@ -20,14 +14,44 @@
     "step": {
       "init": {
         "title": "SecretSentry Options",
-        "description": "Configure the scan interval for security checks.",
+        "description": "Configure scanning options for SecretSentry.",
         "data": {
-          "scan_interval": "Scan interval (seconds)"
+          "scan_interval": "Automatic Scan Interval",
+          "enable_snapshot_scan": "Scan backup archives",
+          "enable_git_subprocess_checks": "Enable git subprocess checks",
+          "enable_secret_age": "Check secret age metadata",
+          "enable_external_url_self_check": "Enable external URL self-check"
         },
         "data_description": {
-          "scan_interval": "How often to scan for security issues (300-86400 seconds)"
+          "scan_interval": "How often to automatically scan for security issues",
+          "enable_snapshot_scan": "Scan .tar and .zip files in backup directories for secrets",
+          "enable_git_subprocess_checks": "Run git commands to check if secrets.yaml is tracked (requires git)",
+          "enable_secret_age": "Check for old secrets based on date comments in secrets.yaml",
+          "enable_external_url_self_check": "Check YOUR OWN external URL for security issues"
+        }
+      },
+      "external_url": {
+        "title": "External URL Configuration",
+        "description": "Enter YOUR external URL to check. This will ONLY check the URL you provide - no other systems are scanned.",
+        "data": {
+          "external_url": "Your External URL"
+        },
+        "data_description": {
+          "external_url": "The external URL of YOUR Home Assistant instance (e.g., https://myhome.duckdns.org)"
+        }
+      },
+      "advanced": {
+        "title": "Advanced Options",
+        "description": "Configure advanced scanning limits.",
+        "data": {
+          "max_file_size_kb": "Maximum file size",
+          "max_total_scan_mb": "Maximum total scan size",
+          "max_findings": "Maximum findings"
         }
       }
+    },
+    "error": {
+      "invalid_url": "Invalid URL format. Please enter a valid URL."
     }
   },
   "entity": {
@@ -42,32 +66,76 @@
   },
   "issues": {
     "r001": {
-      "title": "Inline Secret Detected",
-      "description": "A sensitive configuration key contains a hardcoded value instead of using !secret reference.\n\n**File:** {file_path}\n**Line:** {line_number}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     },
     "r002": {
-      "title": "JWT Token Detected",
-      "description": "A JSON Web Token (JWT) was found in configuration files.\n\n**File:** {file_path}\n**Line:** {line_number}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     },
     "r003": {
-      "title": "PEM Private Key Detected",
-      "description": "A PEM-encoded private key block was detected in configuration.\n\n**File:** {file_path}\n**Line:** {line_number}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     },
     "r004": {
-      "title": "Missing Secret Reference",
-      "description": "A !secret reference points to a key that does not exist in secrets.yaml.\n\n**File:** {file_path}\n**Line:** {line_number}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     },
     "r005": {
-      "title": "Gitignore Missing Recommended Entries",
-      "description": "The .gitignore file is missing recommended entries to protect sensitive files.\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     },
-    "r006": {
-      "title": "HTTP Security Configuration Issue",
-      "description": "The HTTP integration has security settings that may allow brute force attacks.\n\n**File:** {file_path}\n**Line:** {line_number}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    "r010": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     },
-    "r007": {
-      "title": "Overly Broad Trusted Proxies",
-      "description": "The trusted_proxies configuration allows all IP addresses, which is insecure.\n\n**File:** {file_path}\n**Line:** {line_number}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    "r011": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r012": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r020": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r021": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r022": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r023": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r030": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r040": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r050": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r060": {
+      "title": "{title}",
+      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r070": {
+      "title": "{title}",
+      "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
+    },
+    "r071": {
+      "title": "{title}",
+      "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
     }
   },
   "services": {
@@ -78,6 +146,14 @@
     "export_report": {
       "name": "Export Report",
       "description": "Export a masked JSON report of all findings to /config/secretsentry_report.json."
+    },
+    "export_sanitised_copy": {
+      "name": "Export Sanitised Copy",
+      "description": "Create a sanitised copy of configuration files with secrets replaced by ***REDACTED***."
+    },
+    "run_selftest": {
+      "name": "Run Self-Test",
+      "description": "Run internal self-tests to verify the scanner is working correctly."
     }
   }
 }

@@ -1,16 +1,25 @@
 """DataUpdateCoordinator for SecretSentry integration."""
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timedelta
 import logging
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
-from .scanner import Finding, SecretSentryScanner
+from .const import (
+    CONF_ENABLE_EXTERNAL_CHECK,
+    CONF_EXTERNAL_URL,
+    CONF_SCAN_INTERVAL,
+    DOMAIN,
+    SCAN_INTERVALS,
+    STORAGE_KEY,
+    STORAGE_VERSION,
+    Severity,
+)
+from .scanner import ScanResult, SecretSentryScanner
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -19,63 +28,106 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class SecretSentryData:
-    """Data class to hold scan results."""
+    """Data class to hold scan results and delta information."""
 
     def __init__(
         self,
-        findings: list[Finding],
-        last_scan: datetime,
-        scan_duration: float,
+        scan_result: ScanResult,
+        new_fingerprints: set[str],
+        resolved_fingerprints: set[str],
+        external_check_result: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the data class.
 
         Args:
-            findings: List of security findings.
-            last_scan: Timestamp of the last scan.
-            scan_duration: Duration of the scan in seconds.
+            scan_result: Result from the scanner.
+            new_fingerprints: Fingerprints of new findings.
+            resolved_fingerprints: Fingerprints of resolved findings.
+            external_check_result: Results from external URL check.
         """
-        self.findings = findings
-        self.last_scan = last_scan
-        self.scan_duration = scan_duration
+        self.scan_result = scan_result
+        self.new_fingerprints = new_fingerprints
+        self.resolved_fingerprints = resolved_fingerprints
+        self.external_check_result = external_check_result
+
+    @property
+    def findings(self):
+        """Get findings from scan result."""
+        return self.scan_result.findings
 
     @property
     def total_findings(self) -> int:
         """Get total number of findings."""
-        return len(self.findings)
+        return self.scan_result.total_findings
 
     @property
-    def high_severity_count(self) -> int:
-        """Get count of high and critical severity findings."""
-        from .const import Severity
+    def high_count(self) -> int:
+        """Get count of high severity findings."""
+        return self.scan_result.high_count
 
-        return len(
-            [
-                f
-                for f in self.findings
-                if f.severity in (Severity.HIGH, Severity.CRITICAL)
-            ]
+    @property
+    def med_count(self) -> int:
+        """Get count of medium severity findings."""
+        return self.scan_result.med_count
+
+    @property
+    def low_count(self) -> int:
+        """Get count of low severity findings."""
+        return self.scan_result.low_count
+
+    @property
+    def new_high_count(self) -> int:
+        """Get count of new high severity findings."""
+        return len([
+            f for f in self.scan_result.findings
+            if f.fingerprint in self.new_fingerprints
+            and f.severity == Severity.HIGH
+        ])
+
+    @property
+    def resolved_count(self) -> int:
+        """Get count of resolved findings."""
+        return len(self.resolved_fingerprints)
+
+    @property
+    def last_scan(self) -> datetime:
+        """Get timestamp of last scan."""
+        return self.scan_result.timestamp
+
+    @property
+    def scan_duration(self) -> float:
+        """Get duration of last scan."""
+        return self.scan_result.scan_duration
+
+    def get_top_findings(self, limit: int = 5) -> list[str]:
+        """Get top findings as summary strings.
+
+        Args:
+            limit: Maximum number of findings to return.
+
+        Returns:
+            List of summary strings (no secrets).
+        """
+        # Sort by severity (high first)
+        severity_order = {Severity.HIGH: 0, Severity.MED: 1, Severity.LOW: 2, Severity.INFO: 3}
+        sorted_findings = sorted(
+            self.scan_result.findings,
+            key=lambda f: severity_order.get(f.severity, 99)
         )
-
-    @property
-    def findings_by_severity(self) -> dict[str, int]:
-        """Get findings count grouped by severity."""
-        from .const import Severity
-
-        counts: dict[str, int] = {s.value: 0 for s in Severity}
-        for finding in self.findings:
-            counts[finding.severity] += 1
-        return counts
+        return [f.summary(80) for f in sorted_findings[:limit]]
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
-            "total_findings": self.total_findings,
-            "high_severity_count": self.high_severity_count,
-            "findings_by_severity": self.findings_by_severity,
-            "last_scan": self.last_scan.isoformat(),
-            "scan_duration": self.scan_duration,
-            "findings": [f.to_dict() for f in self.findings],
+        base = self.scan_result.to_dict()
+        base["delta"] = {
+            "new_fingerprints": list(self.new_fingerprints),
+            "resolved_fingerprints": list(self.resolved_fingerprints),
+            "new_high_count": self.new_high_count,
+            "resolved_count": self.resolved_count,
         }
+        if self.external_check_result:
+            base["external_self_check"] = self.external_check_result
+        return base
 
 
 class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
@@ -91,24 +143,32 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
         self,
         hass: HomeAssistant,
         config_entry: ConfigEntry,
-        scan_interval: int = DEFAULT_SCAN_INTERVAL,
     ) -> None:
         """Initialize the coordinator.
 
         Args:
             hass: Home Assistant instance.
             config_entry: Configuration entry for this integration.
-            scan_interval: Interval between scans in seconds.
         """
+        # Determine scan interval from options
+        interval_key = config_entry.options.get(CONF_SCAN_INTERVAL, "daily")
+        interval_seconds = SCAN_INTERVALS.get(interval_key)
+
+        update_interval = None
+        if interval_seconds:
+            update_interval = timedelta(seconds=interval_seconds)
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=scan_interval),
+            update_interval=update_interval,
         )
         self.config_entry = config_entry
         self._config_path = hass.config.path()
-        self._previous_findings: dict[str, Finding] = {}
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._previous_fingerprints: set[str] = set()
+        self._loaded_state = False
 
     async def _async_update_data(self) -> SecretSentryData:
         """Fetch data from scanner.
@@ -118,93 +178,135 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
 
         Returns:
             SecretSentryData containing scan results.
-
-        Raises:
-            UpdateFailed: If the scan fails.
         """
-        start_time = datetime.now()
+        # Load previous state if not loaded
+        if not self._loaded_state:
+            await self._load_state()
+
+        # Get options for scanner
+        options = dict(self.config_entry.options)
 
         # Run scanner in executor to avoid blocking the event loop
-        findings = await self.hass.async_add_executor_job(self._run_scan)
-
-        end_time = datetime.now()
-        scan_duration = (end_time - start_time).total_seconds()
+        scan_result = await self.hass.async_add_executor_job(
+            self._run_scan, options
+        )
 
         _LOGGER.debug(
             "Scan completed in %.2f seconds. Found %d issues.",
-            scan_duration,
-            len(findings),
+            scan_result.scan_duration,
+            scan_result.total_findings,
         )
 
-        # Store current findings for comparison
-        current_findings = {f.unique_key: f for f in findings}
+        # Calculate delta
+        current_fingerprints = scan_result.fingerprints
+        new_fingerprints = current_fingerprints - self._previous_fingerprints
+        resolved_fingerprints = self._previous_fingerprints - current_fingerprints
+
+        # Run external check if enabled
+        external_result = None
+        if options.get(CONF_ENABLE_EXTERNAL_CHECK):
+            external_url = options.get(CONF_EXTERNAL_URL)
+            if external_url:
+                external_result = await self._run_external_check(external_url)
+                # Add external findings to scan result
+                if external_result and external_result.get("findings"):
+                    scan_result.findings.extend(external_result["findings"])
+
+        # Create data object
+        data = SecretSentryData(
+            scan_result=scan_result,
+            new_fingerprints=new_fingerprints,
+            resolved_fingerprints=resolved_fingerprints,
+            external_check_result=external_result,
+        )
 
         # Update repairs
-        await self._update_repairs(current_findings)
+        await self._update_repairs(data)
 
-        self._previous_findings = current_findings
+        # Save state
+        self._previous_fingerprints = current_fingerprints
+        await self._save_state(data)
 
-        return SecretSentryData(
-            findings=findings,
-            last_scan=end_time,
-            scan_duration=scan_duration,
-        )
+        return data
 
-    def _run_scan(self) -> list[Finding]:
+    def _run_scan(self, options: dict[str, Any]) -> ScanResult:
         """Run the security scan synchronously.
 
         This method is executed in the executor pool.
 
-        Returns:
-            List of security findings.
-        """
-        scanner = SecretSentryScanner(self._config_path)
-        return scanner.scan()
+        Args:
+            options: Scanner options from config entry.
 
-    async def _update_repairs(
-        self, current_findings: dict[str, Finding]
-    ) -> None:
+        Returns:
+            ScanResult with all findings.
+        """
+        scanner = SecretSentryScanner(self._config_path, options)
+        return scanner.scan(self._previous_fingerprints)
+
+    async def _run_external_check(
+        self, external_url: str
+    ) -> dict[str, Any] | None:
+        """Run external URL security check.
+
+        Args:
+            external_url: The user's external URL to check.
+
+        Returns:
+            Dictionary with check results or None on error.
+        """
+        try:
+            from .http_check import check_external_url
+
+            return await check_external_url(self.hass, external_url)
+        except Exception as err:
+            _LOGGER.warning("External URL check failed: %s", err)
+            return {"error": str(err), "findings": []}
+
+    async def _update_repairs(self, data: SecretSentryData) -> None:
         """Update repair issues based on scan results.
 
         Creates new repair issues for new findings and removes
         resolved issues.
 
         Args:
-            current_findings: Dictionary of current findings keyed by unique_key.
+            data: Current scan data.
         """
         from homeassistant.helpers import issue_registry as ir
 
-        # Get keys for comparison
-        current_keys = set(current_findings.keys())
-        previous_keys = set(self._previous_findings.keys())
+        # Create issues for new findings
+        for fingerprint in data.new_fingerprints:
+            # Find the finding with this fingerprint
+            finding = next(
+                (f for f in data.findings if f.fingerprint == fingerprint),
+                None
+            )
+            if not finding:
+                continue
 
-        # New findings - create repair issues
-        new_keys = current_keys - previous_keys
-        for key in new_keys:
-            finding = current_findings[key]
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
-                key,
+                fingerprint,
                 is_fixable=False,
                 is_persistent=True,
                 severity=self._map_severity_to_ir(finding.severity),
                 translation_key=finding.rule_id.lower(),
                 translation_placeholders={
+                    "title": finding.title,
                     "file_path": finding.file_path,
-                    "line_number": str(finding.line_number),
-                    "evidence": finding.evidence_masked,
+                    "line": str(finding.line) if finding.line else "N/A",
+                    "evidence": finding.evidence_masked or "N/A",
                     "recommendation": finding.recommendation,
+                    "description": finding.description,
                 },
             )
 
-        # Resolved findings - delete repair issues
-        resolved_keys = previous_keys - current_keys
-        for key in resolved_keys:
-            ir.async_delete_issue(self.hass, DOMAIN, key)
+        # Remove resolved issues
+        for fingerprint in data.resolved_fingerprints:
+            ir.async_delete_issue(self.hass, DOMAIN, fingerprint)
 
     @staticmethod
-    def _map_severity_to_ir(severity: str) -> ir.IssueSeverity:
+    def _map_severity_to_ir(severity: str) -> "ir.IssueSeverity":
         """Map finding severity to issue registry severity.
 
         Args:
@@ -215,16 +317,51 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
         """
         from homeassistant.helpers import issue_registry as ir
 
-        from .const import Severity
-
         mapping = {
-            Severity.CRITICAL: ir.IssueSeverity.ERROR,
             Severity.HIGH: ir.IssueSeverity.ERROR,
-            Severity.MEDIUM: ir.IssueSeverity.WARNING,
+            Severity.MED: ir.IssueSeverity.WARNING,
             Severity.LOW: ir.IssueSeverity.WARNING,
             Severity.INFO: ir.IssueSeverity.WARNING,
         }
         return mapping.get(severity, ir.IssueSeverity.WARNING)
+
+    async def _load_state(self) -> None:
+        """Load previous scan state from storage."""
+        try:
+            stored = await self._store.async_load()
+            if stored and isinstance(stored, dict):
+                fingerprints = stored.get("fingerprints", [])
+                self._previous_fingerprints = set(fingerprints)
+                _LOGGER.debug(
+                    "Loaded %d previous fingerprints from storage",
+                    len(self._previous_fingerprints)
+                )
+        except Exception as err:
+            _LOGGER.warning("Failed to load state: %s", err)
+
+        self._loaded_state = True
+
+    async def _save_state(self, data: SecretSentryData) -> None:
+        """Save scan state to storage.
+
+        Only stores fingerprints and counts, never raw secrets.
+
+        Args:
+            data: Current scan data.
+        """
+        try:
+            state = {
+                "fingerprints": list(data.scan_result.fingerprints),
+                "counts": {
+                    "high": data.high_count,
+                    "med": data.med_count,
+                    "low": data.low_count,
+                },
+                "last_scan": data.last_scan.isoformat(),
+            }
+            await self._store.async_save(state)
+        except Exception as err:
+            _LOGGER.warning("Failed to save state: %s", err)
 
     async def async_scan_now(self) -> SecretSentryData:
         """Trigger an immediate scan.
@@ -252,7 +389,6 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
         report_path = Path(self._config_path) / REPORT_FILENAME
 
         report_data = {
-            "generated_at": datetime.now().isoformat(),
             "config_path": self._config_path,
             **self.data.to_dict(),
         }
@@ -266,3 +402,32 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
 
         _LOGGER.info("Security report exported to %s", report_path)
         return str(report_path)
+
+    async def async_export_sanitised(self) -> tuple[str, int, list[str]]:
+        """Export sanitised copy of configuration.
+
+        Returns:
+            Tuple of (output_dir, files_processed, errors).
+        """
+        from pathlib import Path
+
+        from .const import SANITISED_DIR
+        from .scanner import create_sanitised_copy
+
+        output_dir = str(Path(self._config_path) / SANITISED_DIR)
+        options = dict(self.config_entry.options)
+
+        files_processed, errors = await self.hass.async_add_executor_job(
+            create_sanitised_copy,
+            self._config_path,
+            output_dir,
+            options,
+        )
+
+        _LOGGER.info(
+            "Sanitised copy created at %s (%d files)",
+            output_dir,
+            files_processed
+        )
+
+        return output_dir, files_processed, errors
