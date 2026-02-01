@@ -80,6 +80,12 @@
       },
       "high_severity_findings": {
         "name": "High Severity Findings"
+      },
+      "medium_severity_findings": {
+        "name": "Medium Severity Findings"
+      },
+      "low_severity_findings": {
+        "name": "Low Severity Findings"
       }
     }
   },
