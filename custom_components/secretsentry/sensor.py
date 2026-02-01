@@ -39,9 +39,20 @@ def _get_high_count(data: SecretSentryData) -> int:
     return data.high_count
 
 
+def _get_med_count(data: SecretSentryData) -> int:
+    """Get count of medium severity findings."""
+    return data.med_count
+
+
+def _get_low_count(data: SecretSentryData) -> int:
+    """Get count of low severity findings."""
+    return data.low_count
+
+
 def _get_findings_attributes(data: SecretSentryData) -> dict[str, Any]:
     """Get extra attributes for total findings sensor."""
     return {
+        "high_count": data.high_count,
         "med_count": data.med_count,
         "low_count": data.low_count,
         "last_scan": data.last_scan.isoformat() if data.last_scan else None,
@@ -71,6 +82,42 @@ def _get_high_severity_attributes(data: SecretSentryData) -> dict[str, Any]:
     }
 
 
+def _get_med_severity_attributes(data: SecretSentryData) -> dict[str, Any]:
+    """Get extra attributes for medium severity sensor."""
+    med_findings = [
+        f for f in data.findings if f.severity == Severity.MED
+    ]
+    return {
+        "findings": [
+            {
+                "rule_id": f.rule_id,
+                "title": f.title,
+                "file": f.file_path,
+                "line": f.line,
+            }
+            for f in med_findings[:10]  # Limit to first 10
+        ],
+    }
+
+
+def _get_low_severity_attributes(data: SecretSentryData) -> dict[str, Any]:
+    """Get extra attributes for low severity sensor."""
+    low_findings = [
+        f for f in data.findings if f.severity in (Severity.LOW, Severity.INFO)
+    ]
+    return {
+        "findings": [
+            {
+                "rule_id": f.rule_id,
+                "title": f.title,
+                "file": f.file_path,
+                "line": f.line,
+            }
+            for f in low_findings[:10]  # Limit to first 10
+        ],
+    }
+
+
 SENSOR_DESCRIPTIONS: tuple[SecretSentrySensorEntityDescription, ...] = (
     SecretSentrySensorEntityDescription(
         key="total_findings",
@@ -89,6 +136,24 @@ SENSOR_DESCRIPTIONS: tuple[SecretSentrySensorEntityDescription, ...] = (
         icon="mdi:shield-alert",
         value_fn=_get_high_count,
         extra_state_attributes_fn=_get_high_severity_attributes,
+    ),
+    SecretSentrySensorEntityDescription(
+        key="medium_severity_findings",
+        translation_key="medium_severity_findings",
+        native_unit_of_measurement="findings",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:shield-half-full",
+        value_fn=_get_med_count,
+        extra_state_attributes_fn=_get_med_severity_attributes,
+    ),
+    SecretSentrySensorEntityDescription(
+        key="low_severity_findings",
+        translation_key="low_severity_findings",
+        native_unit_of_measurement="findings",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:shield-outline",
+        value_fn=_get_low_count,
+        extra_state_attributes_fn=_get_low_severity_attributes,
     ),
 )
 
