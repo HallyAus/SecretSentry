@@ -3,9 +3,13 @@
 This module provides built-in self-testing functionality to verify
 that the scanner rules are working correctly. It tests against
 sample data without touching the actual filesystem.
+
+v3.0: Added tests for URL userinfo, log scanning, env files,
+and export secret verification.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,11 +19,12 @@ from typing import Any
 from .const import RuleID
 from .sample_data import (
     EXPECTED_FINDINGS,
+    SAMPLE_LOG_CONTENT,
     SAMPLE_SAFE_CONFIG,
     TEST_SECRET_VALUES,
     get_sample_files,
 )
-from .scanner import SecretSentryScanner
+from .scanner import SecretSentryScanner, create_sanitised_copy, export_report_with_privacy
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,8 +90,16 @@ def run_selftest() -> SelfTestResult:
             # Create .git directory to trigger git rules
             (tmppath / ".git").mkdir()
 
-            # Run scanner
-            scanner = SecretSentryScanner(str(tmppath), {})
+            # v3.0: Create log file for log scanning test
+            (tmppath / "home-assistant.log").write_text(SAMPLE_LOG_CONTENT)
+
+            # Run scanner with v3.0 options enabled
+            scanner = SecretSentryScanner(str(tmppath), {
+                "enable_log_scan": True,
+                "log_scan_paths": ["home-assistant.log"],
+                "enable_env_hygiene": True,
+                "env_files": [".env", "docker-compose.yml"],
+            })
             result = scanner.scan()
 
             # Check that expected findings are present
@@ -154,6 +167,22 @@ def run_selftest() -> SelfTestResult:
                     "test": "R004_SECRET_REF_MISSING detection",
                     "passed": False,
                     "message": "Failed to detect missing secret references",
+                })
+
+            # v3.0 Test: R008 URL userinfo detected
+            total_count += 1
+            if RuleID.R008_URL_USERINFO in found_rules:
+                passed_count += 1
+                assertions.append({
+                    "test": "R008_URL_USERINFO detection",
+                    "passed": True,
+                    "message": "URL credentials correctly detected",
+                })
+            else:
+                assertions.append({
+                    "test": "R008_URL_USERINFO detection",
+                    "passed": False,
+                    "message": "Failed to detect URL credentials",
                 })
 
             # Test: R011 gitignore weak detected
@@ -236,7 +265,71 @@ def run_selftest() -> SelfTestResult:
                     "message": "Failed to detect short webhook IDs",
                 })
 
-        # Test 2: Verify masking works
+            # v3.0 Test: R080 log contains secret detected
+            total_count += 1
+            if RuleID.R080_LOG_CONTAINS_SECRET in found_rules:
+                passed_count += 1
+                assertions.append({
+                    "test": "R080_LOG_CONTAINS_SECRET detection",
+                    "passed": True,
+                    "message": "Secrets in logs correctly detected",
+                })
+            else:
+                assertions.append({
+                    "test": "R080_LOG_CONTAINS_SECRET detection",
+                    "passed": False,
+                    "message": "Failed to detect secrets in logs",
+                })
+
+            # v3.0 Test: R090 .env file present detected
+            total_count += 1
+            if RuleID.R090_ENV_FILE_PRESENT in found_rules:
+                passed_count += 1
+                assertions.append({
+                    "test": "R090_ENV_FILE_PRESENT detection",
+                    "passed": True,
+                    "message": ".env file presence correctly detected",
+                })
+            else:
+                assertions.append({
+                    "test": "R090_ENV_FILE_PRESENT detection",
+                    "passed": False,
+                    "message": "Failed to detect .env file presence",
+                })
+
+            # v3.0 Test: R091 .env inline secret detected
+            total_count += 1
+            if RuleID.R091_ENV_INLINE_SECRET in found_rules:
+                passed_count += 1
+                assertions.append({
+                    "test": "R091_ENV_INLINE_SECRET detection",
+                    "passed": True,
+                    "message": ".env inline secrets correctly detected",
+                })
+            else:
+                assertions.append({
+                    "test": "R091_ENV_INLINE_SECRET detection",
+                    "passed": False,
+                    "message": "Failed to detect .env inline secrets",
+                })
+
+            # v3.0 Test: R092 docker-compose inline secret detected
+            total_count += 1
+            if RuleID.R092_DOCKER_COMPOSE_INLINE_SECRET in found_rules:
+                passed_count += 1
+                assertions.append({
+                    "test": "R092_DOCKER_COMPOSE_INLINE_SECRET detection",
+                    "passed": True,
+                    "message": "docker-compose inline secrets correctly detected",
+                })
+            else:
+                assertions.append({
+                    "test": "R092_DOCKER_COMPOSE_INLINE_SECRET detection",
+                    "passed": False,
+                    "message": "Failed to detect docker-compose inline secrets",
+                })
+
+        # Test 2: Verify masking works - no raw secrets in evidence
         total_count += 1
         masking_passed = True
         for finding in result.findings:
@@ -252,18 +345,43 @@ def run_selftest() -> SelfTestResult:
         if masking_passed:
             passed_count += 1
             assertions.append({
-                "test": "Secret masking",
+                "test": "Secret masking in evidence",
                 "passed": True,
                 "message": "All secrets properly masked in evidence",
             })
         else:
             assertions.append({
-                "test": "Secret masking",
+                "test": "Secret masking in evidence",
                 "passed": False,
                 "message": "Raw secrets found in evidence - masking failed",
             })
 
-        # Test 3: Safe config should have minimal findings
+        # v3.0 Test 3: Verify no raw secrets in export report
+        total_count += 1
+        report_dict = export_report_with_privacy(result, {"privacy_mode_reports": True})
+        report_json = json.dumps(report_dict)
+        export_masking_passed = True
+        for secret in TEST_SECRET_VALUES:
+            if secret in report_json:
+                export_masking_passed = False
+                errors.append(f"Raw secret found in export: {secret[:10]}...")
+                break
+
+        if export_masking_passed:
+            passed_count += 1
+            assertions.append({
+                "test": "Secret masking in exports",
+                "passed": True,
+                "message": "All secrets properly masked in exported report",
+            })
+        else:
+            assertions.append({
+                "test": "Secret masking in exports",
+                "passed": False,
+                "message": "Raw secrets found in exported report - masking failed",
+            })
+
+        # Test 4: Safe config should have minimal findings
         with TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
             (tmppath / "configuration.yaml").write_text(SAMPLE_SAFE_CONFIG)
@@ -292,7 +410,7 @@ def run_selftest() -> SelfTestResult:
                     "message": f"Safe configuration incorrectly flagged with {len(r001_findings)} R001 findings",
                 })
 
-        # Test 4: Fingerprint stability
+        # Test 5: Fingerprint stability
         total_count += 1
         fingerprints = {f.fingerprint for f in result.findings}
         if len(fingerprints) == len(result.findings):
@@ -308,6 +426,49 @@ def run_selftest() -> SelfTestResult:
                 "passed": False,
                 "message": "Duplicate fingerprints detected",
             })
+
+        # v3.0 Test 6: Verify sanitised copy has no raw secrets
+        total_count += 1
+        with TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+            srcpath = tmppath / "src"
+            destpath = tmppath / "dest"
+            srcpath.mkdir()
+
+            # Write sample files
+            for filename, content in sample_files.items():
+                (srcpath / filename).write_text(content)
+
+            # Create sanitised copy
+            files_copied, copy_errors = create_sanitised_copy(
+                str(srcpath), str(destpath), {"privacy_mode_reports": True}
+            )
+
+            # Check sanitised files for raw secrets
+            sanitised_clean = True
+            for filename in sample_files.keys():
+                sanitised_file = destpath / filename
+                if sanitised_file.exists():
+                    content = sanitised_file.read_text()
+                    for secret in TEST_SECRET_VALUES:
+                        if secret in content:
+                            sanitised_clean = False
+                            errors.append(f"Raw secret in sanitised copy {filename}: {secret[:10]}...")
+                            break
+
+            if sanitised_clean and files_copied > 0:
+                passed_count += 1
+                assertions.append({
+                    "test": "Sanitised copy has no secrets",
+                    "passed": True,
+                    "message": f"All {files_copied} sanitised files have no raw secrets",
+                })
+            else:
+                assertions.append({
+                    "test": "Sanitised copy has no secrets",
+                    "passed": False,
+                    "message": "Raw secrets found in sanitised copy",
+                })
 
     except Exception as err:
         _LOGGER.exception("Self-test error: %s", err)

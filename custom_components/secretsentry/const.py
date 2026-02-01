@@ -8,7 +8,7 @@ DOMAIN: Final = "secretsentry"
 
 # Storage keys
 STORAGE_KEY: Final = f"{DOMAIN}_state"
-STORAGE_VERSION: Final = 1
+STORAGE_VERSION: Final = 2
 
 # Configuration keys
 CONF_SCAN_INTERVAL: Final = "scan_interval"
@@ -23,6 +23,20 @@ CONF_MAX_FILE_SIZE_KB: Final = "max_file_size_kb"
 CONF_MAX_TOTAL_SCAN_MB: Final = "max_total_scan_mb"
 CONF_MAX_FINDINGS: Final = "max_findings"
 
+# v3.0: Log scanning options
+CONF_ENABLE_LOG_SCAN: Final = "enable_log_scan"
+CONF_LOG_SCAN_PATHS: Final = "log_scan_paths"
+CONF_MAX_LOG_SCAN_MB: Final = "max_log_scan_mb"
+CONF_MAX_LOG_LINES: Final = "max_log_lines"
+
+# v3.0: Environment hygiene options
+CONF_ENABLE_ENV_HYGIENE: Final = "enable_env_hygiene"
+CONF_ENV_FILES: Final = "env_files"
+CONF_ADDON_CONFIG_DIRS: Final = "addon_config_dirs"
+
+# v3.0: Privacy mode option
+CONF_PRIVACY_MODE_REPORTS: Final = "privacy_mode_reports"
+
 # Default configuration values
 DEFAULT_SCAN_INTERVAL: Final = "daily"  # disabled, daily, weekly
 DEFAULT_MAX_FILE_SIZE_KB: Final = 512
@@ -30,6 +44,20 @@ DEFAULT_MAX_TOTAL_SCAN_MB: Final = 50
 DEFAULT_MAX_FINDINGS: Final = 500
 DEFAULT_SNAPSHOT_MEMBER_SIZE: Final = 256 * 1024  # 256KB per archive member
 DEFAULT_SNAPSHOT_TOTAL_SIZE: Final = 5 * 1024 * 1024  # 5MB total for archive scanning
+
+# v3.0: Log scanning defaults
+DEFAULT_ENABLE_LOG_SCAN: Final = False  # Off by default
+DEFAULT_LOG_SCAN_PATHS: Final = ["home-assistant.log"]
+DEFAULT_MAX_LOG_SCAN_MB: Final = 10
+DEFAULT_MAX_LOG_LINES: Final = 50000
+
+# v3.0: Environment hygiene defaults
+DEFAULT_ENABLE_ENV_HYGIENE: Final = True  # On by default
+DEFAULT_ENV_FILES: Final = [".env", "docker-compose.yml", "docker-compose.yaml"]
+DEFAULT_ADDON_CONFIG_DIRS: Final = []  # Empty by default, user must specify
+
+# v3.0: Privacy mode default
+DEFAULT_PRIVACY_MODE_REPORTS: Final = True  # On by default
 
 # Scan interval options (in seconds)
 SCAN_INTERVALS: Final[dict[str, int | None]] = {
@@ -82,6 +110,7 @@ class RuleID(StrEnum):
     R003_PEM_BLOCK = "R003"
     R004_SECRET_REF_MISSING = "R004"
     R005_SECRET_DUPLICATION = "R005"
+    R008_URL_USERINFO = "R008"  # v3.0: URL with userinfo
 
     # Group 2: Git hygiene
     R010_GITIGNORE_MISSING = "R010"
@@ -109,6 +138,15 @@ class RuleID(StrEnum):
     # Group 8: External URL checks
     R070_EXTERNAL_URL_WEAK_TLS = "R070"
     R071_API_EXPOSED = "R071"
+
+    # Group 9: Log scanning (v3.0)
+    R080_LOG_CONTAINS_SECRET = "R080"
+
+    # Group 10: Environment hygiene (v3.0)
+    R090_ENV_FILE_PRESENT = "R090"
+    R091_ENV_INLINE_SECRET = "R091"
+    R092_DOCKER_COMPOSE_INLINE_SECRET = "R092"
+    R093_ADDON_CONFIG_EXPORT_RISK = "R093"
 
 
 # Sensitive keys to check for inline secrets (R001)
@@ -138,6 +176,14 @@ SENSITIVE_KEYS: Final[tuple[tuple[str, Severity, int], ...]] = (
     ("auth_token", Severity.HIGH, 20),
     ("credential", Severity.HIGH, 15),
     ("credentials", Severity.HIGH, 15),
+    # v3.0: Additional Docker/env sensitive keys
+    ("db_password", Severity.HIGH, 25),
+    ("database_url", Severity.HIGH, 20),
+    ("redis_password", Severity.HIGH, 25),
+    ("mysql_password", Severity.HIGH, 25),
+    ("postgres_password", Severity.HIGH, 25),
+    ("encryption_key", Severity.HIGH, 30),
+    ("jwt_secret", Severity.HIGH, 30),
 )
 
 # Recommended .gitignore entries
@@ -215,8 +261,17 @@ class Tags(StrEnum):
     AGE = "age"
     EXTERNAL = "external"
     TLS = "tls"
+    LOGS = "logs"  # v3.0
+    ENV = "env"  # v3.0
+    DOCKER = "docker"  # v3.0
+    ADDON = "addon"  # v3.0
+    URL = "url"  # v3.0
 
 
 # External check timeouts
 HTTP_CHECK_TIMEOUT: Final = 10  # seconds
 HTTP_CHECK_MAX_CONTENT: Final = 1024  # bytes to read for response check
+
+# v3.0: Privacy mode tokenization prefix
+PRIVACY_TOKEN_PREFIX: Final = "host_"
+PRIVACY_IP_MASK: Final = "x.x.x.x"

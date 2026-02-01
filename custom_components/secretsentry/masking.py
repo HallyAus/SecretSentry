@@ -9,12 +9,14 @@ import hashlib
 import math
 import re
 from typing import Final
+from urllib.parse import urlparse, urlunparse
 
 # Masking constants
 MASK_CHAR: Final = "*"
 MIN_VISIBLE_CHARS: Final = 4
 MAX_MASK_LENGTH: Final = 20
 REDACTED_PLACEHOLDER: Final = "***REDACTED***"
+REDACTED_URL_CREDS: Final = "***:***"
 
 # Patterns for detecting secrets in text
 JWT_PATTERN: Final = re.compile(
@@ -29,9 +31,29 @@ PEM_END_PATTERN: Final = re.compile(
 SECRET_REF_PATTERN: Final = re.compile(r"!secret\s+(\S+)")
 WEBHOOK_PATTERN: Final = re.compile(r"/api/webhook/([A-Za-z0-9_-]+)")
 
+# v3.0: URL with userinfo pattern (scheme://user:pass@host)
+URL_USERINFO_PATTERN: Final = re.compile(
+    r"([a-zA-Z][a-zA-Z0-9+.-]*://)([^:@/\s]+):([^@/\s]+)@([^\s/]+)"
+)
+
 # Pattern to detect values that look like secrets (high entropy strings)
 SECRET_VALUE_PATTERN: Final = re.compile(
     r'^[A-Za-z0-9+/=_-]{16,}$'
+)
+
+# v3.0: Private IP patterns for privacy mode
+PRIVATE_IP_PATTERN: Final = re.compile(
+    r'\b(?:'
+    r'10\.\d{1,3}\.\d{1,3}\.\d{1,3}|'  # 10.x.x.x
+    r'172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|'  # 172.16-31.x.x
+    r'192\.168\.\d{1,3}\.\d{1,3}|'  # 192.168.x.x
+    r'127\.\d{1,3}\.\d{1,3}\.\d{1,3}'  # 127.x.x.x
+    r')\b'
+)
+
+# v3.0: Hostname/domain pattern for tokenization
+HOSTNAME_PATTERN: Final = re.compile(
+    r'\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b'
 )
 
 
@@ -137,6 +159,44 @@ def mask_webhook_id(webhook_id: str) -> str:
     return f"{webhook_id[:4]}{MASK_CHAR * min(len(webhook_id) - 4, 12)}"
 
 
+def redact_url_userinfo(url: str) -> str:
+    """Redact credentials from a URL with userinfo.
+
+    Detects URLs in format scheme://user:pass@host and replaces
+    the credentials with ***:***.
+
+    Args:
+        url: The URL or text containing URLs to redact.
+
+    Returns:
+        URL with credentials redacted.
+    """
+    if not url:
+        return url
+
+    def replace_userinfo(match: re.Match) -> str:
+        scheme = match.group(1)
+        host = match.group(4)
+        return f"{scheme}{REDACTED_URL_CREDS}@{host}"
+
+    return URL_USERINFO_PATTERN.sub(replace_userinfo, url)
+
+
+def extract_url_userinfo(url: str) -> tuple[str, str] | None:
+    """Extract username and password from a URL with userinfo.
+
+    Args:
+        url: The URL to analyze.
+
+    Returns:
+        Tuple of (username, password) or None if no userinfo.
+    """
+    match = URL_USERINFO_PATTERN.search(url)
+    if match:
+        return (match.group(2), match.group(3))
+    return None
+
+
 def mask_line(
     line: str,
     known_secrets: list[str] | None = None,
@@ -151,6 +211,9 @@ def mask_line(
         Line with secrets masked.
     """
     masked = line
+
+    # v3.0: Mask URL userinfo first
+    masked = redact_url_userinfo(masked)
 
     # Mask JWT tokens
     for match in JWT_PATTERN.finditer(masked):
@@ -268,9 +331,13 @@ def looks_like_secret(value: str, min_length: int = 8) -> tuple[bool, int]:
         confidence += 5
 
     # Negative indicators
-    # Looks like a URL
+    # Looks like a URL (but check for userinfo)
     if stripped.startswith(("http://", "https://", "ftp://")):
-        confidence -= 30
+        # If it has userinfo, it's still a secret concern
+        if extract_url_userinfo(stripped):
+            confidence += 20
+        else:
+            confidence -= 30
 
     # Looks like a path
     if stripped.startswith("/") or "\\" in stripped:
@@ -359,3 +426,139 @@ def redact_value_in_line(line: str, value: str) -> str:
             )
 
     return line.replace(value, REDACTED_PLACEHOLDER)
+
+
+# =============================================================================
+# v3.0: Privacy Mode Utilities
+# =============================================================================
+
+
+class PrivacyTokenizer:
+    """Tokenizer for consistent hostname/IP masking within an export run.
+
+    Creates consistent tokens for hostnames and IPs so that relationships
+    between findings can be preserved while actual values are hidden.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the tokenizer."""
+        self._hostname_map: dict[str, str] = {}
+        self._ip_map: dict[str, str] = {}
+        self._hostname_counter = 0
+        self._ip_counter = 0
+
+    def tokenize_hostname(self, hostname: str) -> str:
+        """Get consistent token for a hostname.
+
+        Args:
+            hostname: The hostname to tokenize.
+
+        Returns:
+            Consistent token for this hostname.
+        """
+        if hostname not in self._hostname_map:
+            self._hostname_counter += 1
+            self._hostname_map[hostname] = f"host_{self._hostname_counter}"
+        return self._hostname_map[hostname]
+
+    def tokenize_ip(self, ip: str) -> str:
+        """Get consistent token for a private IP.
+
+        Args:
+            ip: The IP address to tokenize.
+
+        Returns:
+            Consistent token for this IP.
+        """
+        if ip not in self._ip_map:
+            self._ip_counter += 1
+            self._ip_map[ip] = f"private_ip_{self._ip_counter}"
+        return self._ip_map[ip]
+
+    def apply_privacy_mode(self, text: str) -> str:
+        """Apply privacy mode to text, masking IPs and tokenizing hostnames.
+
+        Does NOT remove file names or line numbers.
+
+        Args:
+            text: The text to process.
+
+        Returns:
+            Text with private IPs masked and hostnames tokenized.
+        """
+        if not text:
+            return text
+
+        result = text
+
+        # Mask private IPs with consistent tokens
+        for match in PRIVATE_IP_PATTERN.finditer(text):
+            ip = match.group(0)
+            result = result.replace(ip, self.tokenize_ip(ip))
+
+        # Tokenize hostnames (but not file paths or common words)
+        for match in HOSTNAME_PATTERN.finditer(text):
+            hostname = match.group(0)
+            # Skip common TLDs that might be false positives
+            if hostname.endswith(('.yaml', '.json', '.yml', '.env', '.txt', '.py')):
+                continue
+            # Skip localhost
+            if hostname == 'localhost':
+                continue
+            result = result.replace(hostname, self.tokenize_hostname(hostname))
+
+        return result
+
+
+def apply_privacy_to_dict(
+    data: dict,
+    tokenizer: PrivacyTokenizer,
+    skip_keys: set[str] | None = None,
+) -> dict:
+    """Apply privacy mode recursively to a dictionary.
+
+    Args:
+        data: Dictionary to process.
+        tokenizer: PrivacyTokenizer instance for consistent tokenization.
+        skip_keys: Keys to skip (like 'file_path', 'line').
+
+    Returns:
+        New dictionary with privacy mode applied.
+    """
+    skip_keys = skip_keys or {'file_path', 'line', 'rule_id', 'fingerprint', 'severity'}
+    result = {}
+
+    for key, value in data.items():
+        if key in skip_keys:
+            result[key] = value
+        elif isinstance(value, str):
+            result[key] = tokenizer.apply_privacy_mode(value)
+        elif isinstance(value, dict):
+            result[key] = apply_privacy_to_dict(value, tokenizer, skip_keys)
+        elif isinstance(value, list):
+            result[key] = [
+                apply_privacy_to_dict(item, tokenizer, skip_keys) if isinstance(item, dict)
+                else tokenizer.apply_privacy_mode(item) if isinstance(item, str)
+                else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+
+    return result
+
+
+def truncate_evidence(evidence: str, max_length: int = 200) -> str:
+    """Truncate evidence string to maximum length.
+
+    Args:
+        evidence: The evidence string.
+        max_length: Maximum allowed length.
+
+    Returns:
+        Truncated evidence with ellipsis if needed.
+    """
+    if not evidence or len(evidence) <= max_length:
+        return evidence
+
+    return evidence[:max_length - 3] + "..."

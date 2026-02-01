@@ -29,9 +29,11 @@ from .masking import (
     JWT_PATTERN,
     PEM_BEGIN_PATTERN,
     SECRET_REF_PATTERN,
+    URL_USERINFO_PATTERN,
     WEBHOOK_PATTERN,
     calculate_entropy,
     create_fingerprint,
+    extract_url_userinfo,
     hash_for_comparison,
     looks_like_secret,
     mask_jwt,
@@ -39,6 +41,8 @@ from .masking import (
     mask_pem,
     mask_secret,
     mask_webhook_id,
+    redact_url_userinfo,
+    truncate_evidence,
 )
 
 if TYPE_CHECKING:
@@ -184,7 +188,7 @@ class Rule(ABC):
             description=description or f"{self.title} detected.",
             file_path=file_path,
             line=line,
-            evidence_masked=mask_line(evidence),
+            evidence_masked=truncate_evidence(mask_line(evidence)),
             recommendation=recommendation or "Review and remediate this finding.",
             tags=self.tags.copy(),
             fingerprint=create_fingerprint(
@@ -554,6 +558,69 @@ class R005SecretDuplication(Rule):
                     )
         except Exception as err:
             _LOGGER.debug("R005 context evaluation error: %s", err)
+
+        return findings
+
+
+# =============================================================================
+# v3.0: R008 - URL Userinfo Detection
+# =============================================================================
+
+
+class R008URLUserinfo(Rule):
+    """Detect credentials embedded in URLs (userinfo)."""
+
+    id = RuleID.R008_URL_USERINFO
+    title = "URL Contains Credentials"
+    severity = Severity.HIGH
+    tags = [Tags.SECRETS, Tags.URL]
+
+    def evaluate_file_text(
+        self,
+        file_path: str,
+        lines: list[str],
+        context: ScanContext,
+    ) -> list[Finding]:
+        """Detect URLs with embedded credentials (scheme://user:pass@host)."""
+        findings: list[Finding] = []
+
+        # Skip secrets.yaml
+        if file_path == "secrets.yaml":
+            return findings
+
+        try:
+            for line_num, line in enumerate(lines, start=1):
+                for match in URL_USERINFO_PATTERN.finditer(line):
+                    # Extract components but never store raw password
+                    scheme = match.group(1)
+                    username = match.group(2)
+                    host = match.group(4)
+
+                    findings.append(
+                        Finding(
+                            rule_id=self.id,
+                            severity=self.severity,
+                            confidence=95,
+                            title="Credentials in URL",
+                            description=(
+                                f"A URL contains embedded credentials in the userinfo section. "
+                                f"This exposes the password in configuration and logs."
+                            ),
+                            file_path=file_path,
+                            line=line_num,
+                            evidence_masked=f"{scheme}{mask_secret(username, 2, 0, 4)}:***@{host}",
+                            recommendation=(
+                                "Move the credentials to secrets.yaml and construct "
+                                "the URL dynamically, or use environment variables."
+                            ),
+                            tags=self.tags.copy(),
+                            fingerprint=create_fingerprint(
+                                self.id, file_path, line_num, host
+                            ),
+                        )
+                    )
+        except Exception as err:
+            _LOGGER.debug("R008 error scanning %s: %s", file_path, err)
 
         return findings
 
@@ -1068,7 +1135,7 @@ class R023ExposedPortHint(Rule):
                                 ),
                                 file_path=file_path,
                                 line=line_num,
-                                evidence_masked=mask_line(line.strip()),
+                                evidence_masked=truncate_evidence(mask_line(line.strip())),
                                 recommendation=(
                                     "If exposing externally, use HTTPS, strong auth, "
                                     "and consider a reverse proxy."
@@ -1330,6 +1397,411 @@ class R060SecretAge(Rule):
 
 
 # =============================================================================
+# v3.0 Group 9: Log Scanning
+# =============================================================================
+
+
+class R080LogContainsSecret(Rule):
+    """Detect secrets leaked into log files."""
+
+    id = RuleID.R080_LOG_CONTAINS_SECRET
+    title = "Secret in Log File"
+    severity = Severity.HIGH
+    tags = [Tags.LOGS, Tags.SECRETS]
+
+    def evaluate_file_text(
+        self,
+        file_path: str,
+        lines: list[str],
+        context: ScanContext,
+    ) -> list[Finding]:
+        """Detect secrets in log file content.
+
+        This rule is called from scanner.scan_logs() which streams lines.
+        """
+        findings: list[Finding] = []
+
+        try:
+            for line_num, line in enumerate(lines, start=1):
+                # Check for JWT
+                if JWT_PATTERN.search(line):
+                    findings.append(
+                        Finding(
+                            rule_id=self.id,
+                            severity=self.severity,
+                            confidence=90,
+                            title="JWT Token in Log",
+                            description="A JWT token was found in a log file.",
+                            file_path=file_path,
+                            line=line_num,
+                            evidence_masked=truncate_evidence(mask_line(line.strip())),
+                            recommendation=(
+                                "Ensure logging does not capture authentication tokens. "
+                                "Review application logging configuration."
+                            ),
+                            tags=self.tags.copy(),
+                            fingerprint=create_fingerprint(
+                                self.id, file_path, line_num
+                            ),
+                        )
+                    )
+                    continue
+
+                # Check for PEM
+                if PEM_BEGIN_PATTERN.search(line):
+                    findings.append(
+                        Finding(
+                            rule_id=self.id,
+                            severity=self.severity,
+                            confidence=95,
+                            title="Private Key in Log",
+                            description="A PEM private key header was found in a log file.",
+                            file_path=file_path,
+                            line=line_num,
+                            evidence_masked=mask_pem(line),
+                            recommendation=(
+                                "Private keys should never appear in logs. "
+                                "Review what is being logged."
+                            ),
+                            tags=self.tags.copy(),
+                            fingerprint=create_fingerprint(
+                                self.id, file_path, line_num
+                            ),
+                        )
+                    )
+                    continue
+
+                # Check for URL userinfo
+                if URL_USERINFO_PATTERN.search(line):
+                    findings.append(
+                        Finding(
+                            rule_id=self.id,
+                            severity=self.severity,
+                            confidence=90,
+                            title="URL Credentials in Log",
+                            description="A URL with embedded credentials was found in a log file.",
+                            file_path=file_path,
+                            line=line_num,
+                            evidence_masked=truncate_evidence(redact_url_userinfo(line.strip())),
+                            recommendation=(
+                                "URLs with credentials should not be logged. "
+                                "Consider sanitizing URLs before logging."
+                            ),
+                            tags=self.tags.copy(),
+                            fingerprint=create_fingerprint(
+                                self.id, file_path, line_num
+                            ),
+                        )
+                    )
+                    continue
+
+                # Check for inline secrets patterns
+                for key_pattern, key_severity, _ in SENSITIVE_KEYS[:10]:  # Top patterns
+                    pattern = rf"\b{re.escape(key_pattern)}\s*[=:]\s*['\"]?([^'\"\\s]+)"
+                    match = re.search(pattern, line, re.IGNORECASE)
+                    if match:
+                        value = match.group(1)
+                        is_secret, _ = looks_like_secret(value)
+                        if is_secret:
+                            findings.append(
+                                Finding(
+                                    rule_id=self.id,
+                                    severity=key_severity,
+                                    confidence=75,
+                                    title=f"Possible {key_pattern} in Log",
+                                    description=f"A potential {key_pattern} value was logged.",
+                                    file_path=file_path,
+                                    line=line_num,
+                                    evidence_masked=truncate_evidence(
+                                        f"{key_pattern}={mask_secret(value)}"
+                                    ),
+                                    recommendation=(
+                                        "Avoid logging sensitive values. "
+                                        "Use structured logging with secret redaction."
+                                    ),
+                                    tags=self.tags.copy(),
+                                    fingerprint=create_fingerprint(
+                                        self.id, file_path, line_num, key_pattern
+                                    ),
+                                )
+                            )
+                            break
+
+        except Exception as err:
+            _LOGGER.debug("R080 error scanning %s: %s", file_path, err)
+
+        return findings
+
+
+# =============================================================================
+# v3.0 Group 10: Environment Hygiene
+# =============================================================================
+
+
+class R090EnvFilePresent(Rule):
+    """Advisory about .env files present."""
+
+    id = RuleID.R090_ENV_FILE_PRESENT
+    title = ".env File Present"
+    severity = Severity.LOW
+    tags = [Tags.ENV]
+
+    def evaluate_file_text(
+        self,
+        file_path: str,
+        lines: list[str],
+        context: ScanContext,
+    ) -> list[Finding]:
+        """Check if this is a .env file."""
+        if not file_path.endswith(".env"):
+            return []
+
+        return [
+            Finding(
+                rule_id=self.id,
+                severity=self.severity,
+                confidence=80,
+                title=".env File Found",
+                description=(
+                    f"An environment file '{file_path}' was found. "
+                    "These files often contain secrets and should be protected."
+                ),
+                file_path=file_path,
+                line=None,
+                evidence_masked=f".env file: {file_path}",
+                recommendation=(
+                    "Ensure .env files are in .gitignore and have restricted permissions. "
+                    "Consider using Home Assistant secrets.yaml instead."
+                ),
+                tags=self.tags.copy(),
+            )
+        ]
+
+
+class R091EnvInlineSecret(Rule):
+    """Detect inline secrets in .env files."""
+
+    id = RuleID.R091_ENV_INLINE_SECRET
+    title = "Secret in .env File"
+    severity = Severity.MED
+    tags = [Tags.ENV, Tags.SECRETS]
+
+    def evaluate_file_text(
+        self,
+        file_path: str,
+        lines: list[str],
+        context: ScanContext,
+    ) -> list[Finding]:
+        """Detect secrets in .env files."""
+        if not file_path.endswith(".env"):
+            return []
+
+        findings: list[Finding] = []
+
+        try:
+            for line_num, line in enumerate(lines, start=1):
+                stripped = line.strip()
+
+                # Skip comments and empty lines
+                if not stripped or stripped.startswith("#"):
+                    continue
+
+                # Match KEY=VALUE pattern
+                match = re.match(r'^([A-Z_][A-Z0-9_]*)\s*=\s*(.+)$', stripped, re.IGNORECASE)
+                if not match:
+                    continue
+
+                key_name = match.group(1)
+                value = match.group(2).strip("'\"")
+
+                # Check if key suggests a secret
+                key_lower = key_name.lower()
+                for sensitive_key, key_severity, _ in SENSITIVE_KEYS:
+                    if sensitive_key in key_lower:
+                        is_secret, _ = looks_like_secret(value)
+                        if is_secret or len(value) >= 8:
+                            findings.append(
+                                Finding(
+                                    rule_id=self.id,
+                                    severity=key_severity,
+                                    confidence=80,
+                                    title=f"Secret in .env: {key_name}",
+                                    description=(
+                                        f"The .env file contains '{key_name}' which appears to be a secret."
+                                    ),
+                                    file_path=file_path,
+                                    line=line_num,
+                                    evidence_masked=f"{key_name}={mask_secret(value)}",
+                                    recommendation=(
+                                        "Ensure this .env file is not committed to version control. "
+                                        "Consider migrating to Home Assistant secrets.yaml."
+                                    ),
+                                    tags=self.tags.copy(),
+                                    fingerprint=create_fingerprint(
+                                        self.id, file_path, line_num, key_name
+                                    ),
+                                )
+                            )
+                        break
+
+        except Exception as err:
+            _LOGGER.debug("R091 error scanning %s: %s", file_path, err)
+
+        return findings
+
+
+class R092DockerComposeInlineSecret(Rule):
+    """Detect inline secrets in docker-compose files."""
+
+    id = RuleID.R092_DOCKER_COMPOSE_INLINE_SECRET
+    title = "Secret in docker-compose"
+    severity = Severity.MED
+    tags = [Tags.DOCKER, Tags.SECRETS]
+
+    def evaluate_file_text(
+        self,
+        file_path: str,
+        lines: list[str],
+        context: ScanContext,
+    ) -> list[Finding]:
+        """Detect secrets in docker-compose files."""
+        if not file_path.endswith(("docker-compose.yml", "docker-compose.yaml")):
+            return []
+
+        findings: list[Finding] = []
+
+        try:
+            for line_num, line in enumerate(lines, start=1):
+                stripped = line.strip()
+
+                # Skip comments
+                if stripped.startswith("#"):
+                    continue
+
+                # Check for sensitive environment variables
+                for key_pattern, key_severity, _ in SENSITIVE_KEYS:
+                    # Match patterns like "- PASSWORD=value" or "PASSWORD: value"
+                    patterns = [
+                        rf'-\s*{re.escape(key_pattern)}\s*=\s*(.+)',
+                        rf'{re.escape(key_pattern)}\s*:\s*(.+)',
+                    ]
+                    for pattern in patterns:
+                        match = re.search(pattern, line, re.IGNORECASE)
+                        if match:
+                            value = match.group(1).strip("'\"")
+
+                            # Skip if it's an env var reference
+                            if value.startswith("${") or value.startswith("$"):
+                                continue
+
+                            is_secret, _ = looks_like_secret(value)
+                            if is_secret or len(value) >= 8:
+                                findings.append(
+                                    Finding(
+                                        rule_id=self.id,
+                                        severity=key_severity,
+                                        confidence=80,
+                                        title=f"Secret in docker-compose: {key_pattern}",
+                                        description=(
+                                            f"docker-compose contains hardcoded '{key_pattern}'."
+                                        ),
+                                        file_path=file_path,
+                                        line=line_num,
+                                        evidence_masked=f"{key_pattern}={mask_secret(value)}",
+                                        recommendation=(
+                                            "Use environment variable substitution (${VAR}) "
+                                            "with a .env file instead of hardcoding secrets."
+                                        ),
+                                        tags=self.tags.copy(),
+                                        fingerprint=create_fingerprint(
+                                            self.id, file_path, line_num, key_pattern
+                                        ),
+                                    )
+                                )
+                            break
+
+        except Exception as err:
+            _LOGGER.debug("R092 error scanning %s: %s", file_path, err)
+
+        return findings
+
+
+class R093AddonConfigExportRisk(Rule):
+    """Detect potential export risks in add-on configurations."""
+
+    id = RuleID.R093_ADDON_CONFIG_EXPORT_RISK
+    title = "Add-on Config Export Risk"
+    severity = Severity.LOW
+    tags = [Tags.ADDON, Tags.SECRETS]
+
+    def evaluate_file_text(
+        self,
+        file_path: str,
+        lines: list[str],
+        context: ScanContext,
+    ) -> list[Finding]:
+        """Check add-on config directories for secrets.
+
+        Only scans directories explicitly provided by user.
+        """
+        findings: list[Finding] = []
+
+        # Get user-provided addon config dirs
+        addon_dirs = context.options.get("addon_config_dirs", [])
+        if not addon_dirs:
+            return findings
+
+        # Check if this file is in an addon config dir
+        in_addon_dir = False
+        for addon_dir in addon_dirs:
+            if file_path.startswith(addon_dir) or file_path.startswith(f"{addon_dir}/"):
+                in_addon_dir = True
+                break
+
+        if not in_addon_dir:
+            return findings
+
+        try:
+            for line_num, line in enumerate(lines, start=1):
+                # Check for sensitive keys
+                for key_pattern, key_severity, _ in SENSITIVE_KEYS:
+                    pattern = rf"\b{re.escape(key_pattern)}\s*[:=]\s*(.+)"
+                    match = re.search(pattern, line, re.IGNORECASE)
+                    if match:
+                        value = match.group(1).strip("'\"")
+                        is_secret, _ = looks_like_secret(value)
+                        if is_secret:
+                            findings.append(
+                                Finding(
+                                    rule_id=self.id,
+                                    severity=Severity.MED if key_severity == Severity.HIGH else Severity.LOW,
+                                    confidence=70,
+                                    title=f"Add-on Config Secret: {key_pattern}",
+                                    description=(
+                                        f"Add-on configuration contains '{key_pattern}' which may be exported."
+                                    ),
+                                    file_path=file_path,
+                                    line=line_num,
+                                    evidence_masked=f"{key_pattern}={mask_secret(value)}",
+                                    recommendation=(
+                                        "Be cautious when exporting or sharing add-on configurations. "
+                                        "Secrets may be included in exports or backups."
+                                    ),
+                                    tags=self.tags.copy(),
+                                    fingerprint=create_fingerprint(
+                                        self.id, file_path, line_num, key_pattern
+                                    ),
+                                )
+                            )
+                            break
+
+        except Exception as err:
+            _LOGGER.debug("R093 error scanning %s: %s", file_path, err)
+
+        return findings
+
+
+# =============================================================================
 # Rule Registry
 # =============================================================================
 
@@ -1342,6 +1814,7 @@ def get_all_rules() -> list[Rule]:
         R003PEMBlock(),
         R004SecretRefMissing(),
         R005SecretDuplication(),
+        R008URLUserinfo(),  # v3.0
         R010GitignoreMissing(),
         R011GitignoreWeak(),
         R012SecretsInRepo(),
@@ -1352,4 +1825,9 @@ def get_all_rules() -> list[Rule]:
         R030WebhookShort(),
         R040StorageDirPresent(),
         R060SecretAge(),
+        R080LogContainsSecret(),  # v3.0
+        R090EnvFilePresent(),  # v3.0
+        R091EnvInlineSecret(),  # v3.0
+        R092DockerComposeInlineSecret(),  # v3.0
+        R093AddonConfigExportRisk(),  # v3.0
     ]

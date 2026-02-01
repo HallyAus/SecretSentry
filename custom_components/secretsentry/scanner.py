@@ -16,11 +16,27 @@ from typing import TYPE_CHECKING, Any
 
 from .const import (
     ARCHIVE_EXTENSIONS,
+    CONF_ADDON_CONFIG_DIRS,
+    CONF_ENABLE_ENV_HYGIENE,
+    CONF_ENABLE_LOG_SCAN,
+    CONF_ENV_FILES,
+    CONF_LOG_SCAN_PATHS,
+    CONF_MAX_LOG_LINES,
+    CONF_MAX_LOG_SCAN_MB,
+    CONF_PRIVACY_MODE_REPORTS,
+    DEFAULT_ADDON_CONFIG_DIRS,
+    DEFAULT_ENABLE_ENV_HYGIENE,
+    DEFAULT_ENABLE_LOG_SCAN,
+    DEFAULT_ENV_FILES,
     DEFAULT_EXCLUDE_DIRS,
     DEFAULT_EXCLUDE_PATTERNS,
+    DEFAULT_LOG_SCAN_PATHS,
     DEFAULT_MAX_FILE_SIZE_KB,
     DEFAULT_MAX_FINDINGS,
+    DEFAULT_MAX_LOG_LINES,
+    DEFAULT_MAX_LOG_SCAN_MB,
     DEFAULT_MAX_TOTAL_SCAN_MB,
+    DEFAULT_PRIVACY_MODE_REPORTS,
     DEFAULT_SNAPSHOT_MEMBER_SIZE,
     DEFAULT_SNAPSHOT_TOTAL_SIZE,
     SCANNABLE_EXTENSIONS,
@@ -30,11 +46,19 @@ from .const import (
 from .masking import (
     JWT_PATTERN,
     PEM_BEGIN_PATTERN,
+    REDACTED_PLACEHOLDER,
+    URL_USERINFO_PATTERN,
+    PrivacyTokenizer,
+    apply_privacy_to_dict,
     hash_for_comparison,
+    looks_like_secret,
     mask_secret,
+    redact_url_userinfo,
+    redact_value_in_line,
 )
 from .rules import (
     Finding,
+    R080LogContainsSecret,
     ScanContext,
     get_all_rules,
 )
@@ -135,6 +159,7 @@ class SecretSentryScanner:
         self.config_path = Path(config_path)
         self.options = options or {}
         self._rules = get_all_rules()
+        self._log_rule = R080LogContainsSecret()  # v3.0: dedicated log rule
         self._errors: list[str] = []
 
     def scan(
@@ -216,10 +241,20 @@ class SecretSentryScanner:
             except Exception as err:
                 _LOGGER.debug("Unexpected error scanning %s: %s", file_path, err)
 
+        # v3.0: Scan environment files if enabled
+        if self.options.get(CONF_ENABLE_ENV_HYGIENE, DEFAULT_ENABLE_ENV_HYGIENE):
+            env_findings = self._scan_env_files(context, max_findings - len(findings))
+            findings.extend(env_findings)
+
         # Scan archives if enabled
         if self.options.get("enable_snapshot_scan"):
             archive_findings = self._scan_archives(context, max_findings - len(findings))
             findings.extend(archive_findings)
+
+        # v3.0: Scan logs if enabled
+        if self.options.get(CONF_ENABLE_LOG_SCAN, DEFAULT_ENABLE_LOG_SCAN):
+            log_findings = self._scan_logs(context, max_findings - len(findings))
+            findings.extend(log_findings)
 
         # Run context-level evaluations
         for rule in self._rules:
@@ -378,6 +413,132 @@ class SecretSentryScanner:
             except Exception as err:
                 _LOGGER.debug("Error scanning directory %s: %s", scan_root, err)
 
+    def _scan_env_files(
+        self,
+        context: ScanContext,
+        max_findings: int,
+    ) -> list[Finding]:
+        """Scan environment files (.env, docker-compose.yml).
+
+        v3.0: Added environment hygiene checks.
+
+        Args:
+            context: Scan context.
+            max_findings: Maximum findings to return.
+
+        Returns:
+            List of findings from env files.
+        """
+        findings: list[Finding] = []
+        env_files = self.options.get(CONF_ENV_FILES, DEFAULT_ENV_FILES)
+
+        for env_file in env_files:
+            if len(findings) >= max_findings:
+                break
+
+            file_path = self.config_path / env_file
+            if not file_path.exists():
+                continue
+
+            try:
+                rel_path = env_file
+                content = file_path.read_text(encoding="utf-8", errors="ignore")
+                lines = content.splitlines()
+
+                # Run rules on env file
+                for rule in self._rules:
+                    if len(findings) >= max_findings:
+                        break
+                    try:
+                        rule_findings = rule.evaluate_file_text(rel_path, lines, context)
+                        findings.extend(rule_findings[:max_findings - len(findings)])
+                    except Exception as err:
+                        _LOGGER.debug("Error scanning env file %s: %s", env_file, err)
+
+            except Exception as err:
+                _LOGGER.debug("Error reading env file %s: %s", env_file, err)
+
+        return findings
+
+    def _scan_logs(
+        self,
+        context: ScanContext,
+        max_findings: int,
+    ) -> list[Finding]:
+        """Scan log files for secrets (v3.0).
+
+        Streams lines to avoid loading entire log into memory.
+
+        Args:
+            context: Scan context.
+            max_findings: Maximum findings to return.
+
+        Returns:
+            List of findings from log files.
+        """
+        findings: list[Finding] = []
+        log_paths = self.options.get(CONF_LOG_SCAN_PATHS, DEFAULT_LOG_SCAN_PATHS)
+        max_log_mb = self.options.get(CONF_MAX_LOG_SCAN_MB, DEFAULT_MAX_LOG_SCAN_MB)
+        max_log_lines = self.options.get(CONF_MAX_LOG_LINES, DEFAULT_MAX_LOG_LINES)
+        max_log_bytes = max_log_mb * 1024 * 1024
+
+        for log_path in log_paths:
+            if len(findings) >= max_findings:
+                break
+
+            full_path = self.config_path / log_path
+            if not full_path.exists():
+                continue
+
+            try:
+                file_size = full_path.stat().st_size
+                if file_size > max_log_bytes:
+                    _LOGGER.debug("Log file %s exceeds max size, skipping", log_path)
+                    continue
+
+                # Stream log file line by line
+                lines_read = 0
+                batch_lines: list[str] = []
+                batch_start_line = 1
+
+                with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                    for line_num, line in enumerate(f, start=1):
+                        if len(findings) >= max_findings:
+                            break
+                        if lines_read >= max_log_lines:
+                            break
+
+                        lines_read += 1
+                        batch_lines.append(line.rstrip("\n\r"))
+
+                        # Process in batches of 1000 lines
+                        if len(batch_lines) >= 1000:
+                            batch_findings = self._log_rule.evaluate_file_text(
+                                log_path, batch_lines, context
+                            )
+                            # Adjust line numbers for batch
+                            for bf in batch_findings:
+                                if bf.line:
+                                    bf.line = batch_start_line + bf.line - 1
+                            findings.extend(batch_findings[:max_findings - len(findings)])
+                            batch_start_line = line_num + 1
+                            batch_lines = []
+
+                    # Process remaining lines
+                    if batch_lines and len(findings) < max_findings:
+                        batch_findings = self._log_rule.evaluate_file_text(
+                            log_path, batch_lines, context
+                        )
+                        for bf in batch_findings:
+                            if bf.line:
+                                bf.line = batch_start_line + bf.line - 1
+                        findings.extend(batch_findings[:max_findings - len(findings)])
+
+            except Exception as err:
+                _LOGGER.debug("Error scanning log %s: %s", log_path, err)
+
+        return findings
+
     def _scan_archives(
         self,
         context: ScanContext,
@@ -482,6 +643,24 @@ class SecretSentryScanner:
                     )
                     return
 
+                # v3.0: Check for URL userinfo
+                if URL_USERINFO_PATTERN.search(line):
+                    findings.append(
+                        Finding(
+                            rule_id=RuleID.R050_SNAPSHOT_CONTAINS_SECRETS,
+                            severity=Severity.HIGH,
+                            confidence=90,
+                            title="URL Credentials in Backup Archive",
+                            description=f"Archive contains URL with credentials in {member_name}",
+                            file_path=rel_archive,
+                            line=None,
+                            evidence_masked=f"URL with userinfo in {member_name}",
+                            recommendation="Ensure backups are encrypted and access-controlled.",
+                            tags=["backup", "secrets"],
+                        )
+                    )
+                    return
+
         try:
             suffix = "".join(archive_path.suffixes).lower()
 
@@ -573,6 +752,7 @@ def create_sanitised_copy(
     """Create a sanitised copy of configuration files.
 
     This replaces detected secrets with ***REDACTED***.
+    v3.0: Also redacts URL userinfo and applies privacy mode.
 
     Args:
         config_path: Path to the config directory.
@@ -582,10 +762,13 @@ def create_sanitised_copy(
     Returns:
         Tuple of (files_processed, error_list).
     """
-    from .masking import REDACTED_PLACEHOLDER
-
+    options = options or {}
     config_root = Path(config_path)
     output_root = Path(output_dir)
+
+    # v3.0: Initialize privacy tokenizer if privacy mode is on
+    privacy_mode = options.get(CONF_PRIVACY_MODE_REPORTS, DEFAULT_PRIVACY_MODE_REPORTS)
+    tokenizer = PrivacyTokenizer() if privacy_mode else None
 
     # Create output directory
     output_root.mkdir(parents=True, exist_ok=True)
@@ -612,7 +795,7 @@ Generated: {timestamp}
     sensitive_patterns = [
         # Key-value patterns
         (
-            r'(\b(?:api_key|apikey|token|password|secret|bearer|authorization|client_secret|private_key|access_token|refresh_token|auth_token|webhook|mqtt_password)\s*[:=]\s*)["\']?([^"\'\s\n]+)["\']?',
+            r'(\b(?:api_key|apikey|token|password|secret|bearer|authorization|client_secret|private_key|access_token|refresh_token|auth_token|webhook|mqtt_password|db_password|database_url|redis_password|mysql_password|postgres_password|encryption_key|jwt_secret)\s*[:=]\s*)["\']?([^"\'\s\n]+)["\']?',
             r'\1"***REDACTED***"',
         ),
         # JWT tokens
@@ -637,6 +820,13 @@ Generated: {timestamp}
             for pattern, replacement in sensitive_patterns:
                 sanitised = re.sub(pattern, replacement, sanitised, flags=re.IGNORECASE)
 
+            # v3.0: Redact URL userinfo
+            sanitised = redact_url_userinfo(sanitised)
+
+            # v3.0: Apply privacy mode if enabled
+            if tokenizer:
+                sanitised = tokenizer.apply_privacy_mode(sanitised)
+
             # Write sanitised file
             output_path.write_text(sanitised, encoding="utf-8")
             files_processed += 1
@@ -647,3 +837,28 @@ Generated: {timestamp}
             errors.append(f"Error processing {file_path}: {err}")
 
     return files_processed, errors
+
+
+def export_report_with_privacy(
+    scan_result: ScanResult,
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    """Export scan result with privacy mode applied.
+
+    v3.0: New function for privacy-aware exports.
+
+    Args:
+        scan_result: The scan result to export.
+        options: Options including privacy_mode_reports.
+
+    Returns:
+        Dictionary ready for JSON export.
+    """
+    result_dict = scan_result.to_dict()
+
+    privacy_mode = options.get(CONF_PRIVACY_MODE_REPORTS, DEFAULT_PRIVACY_MODE_REPORTS)
+    if privacy_mode:
+        tokenizer = PrivacyTokenizer()
+        result_dict = apply_privacy_to_dict(result_dict, tokenizer)
+
+    return result_dict
