@@ -9,9 +9,9 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, OptionsFlow, ConfigEntry
 from homeassistant.core import callback
 
-from .const import DOMAIN, DEFAULT_OPTIONS
-
 _LOGGER = logging.getLogger(__name__)
+
+DOMAIN = "secretsentry"
 
 
 class SecretSentryConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -21,10 +21,8 @@ class SecretSentryConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Handle the initial step."""
-        # Keep initial flow simple to avoid crashes.
         if user_input is None:
             return self.async_show_form(step_id="user", data_schema=vol.Schema({}))
-
         return self.async_create_entry(title="SecretSentry", data={})
 
     @staticmethod
@@ -39,49 +37,36 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize options flow."""
-        # Store as _entry to avoid conflict with base class config_entry property
         self._entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Manage the options."""
-        options = {**DEFAULT_OPTIONS, **dict(self._entry.options or {})}
-
-        def _schema(opts: dict[str, Any]) -> vol.Schema:
-            """Build schema with safe defaults."""
-            return vol.Schema(
-                {
-                    vol.Required("privacy_mode_reports", default=bool(opts["privacy_mode_reports"])): bool,
-                    vol.Required("enable_log_scan", default=bool(opts["enable_log_scan"])): bool,
-                    vol.Required("enable_env_hygiene", default=bool(opts["enable_env_hygiene"])): bool,
-                    vol.Required("scan_interval", default=str(opts["scan_interval"])): vol.In(
-                        ["disabled", "daily", "weekly"]
-                    ),
-                    vol.Optional("include_paths", default=list(opts.get("include_paths") or [])): [str],
-                    vol.Optional("exclude_paths", default=list(opts.get("exclude_paths") or [])): [str],
-                    vol.Required("max_file_size_kb", default=int(opts["max_file_size_kb"])): vol.Coerce(int),
-                    vol.Required("max_total_scan_mb", default=int(opts["max_total_scan_mb"])): vol.Coerce(int),
-                    vol.Required("max_findings", default=int(opts["max_findings"])): vol.Coerce(int),
-                }
-            )
+        # Hardcoded defaults - no imports
+        defaults = {
+            "privacy_mode_reports": True,
+            "enable_log_scan": False,
+            "enable_env_hygiene": True,
+            "scan_interval": "daily",
+            "max_file_size_kb": 512,
+            "max_total_scan_mb": 50,
+            "max_findings": 500,
+        }
+        options = {**defaults, **dict(self._entry.options or {})}
 
         if user_input is None:
             try:
-                return self.async_show_form(step_id="init", data_schema=_schema(options))
+                schema = vol.Schema({
+                    vol.Required("privacy_mode_reports", default=options["privacy_mode_reports"]): bool,
+                    vol.Required("enable_log_scan", default=options["enable_log_scan"]): bool,
+                    vol.Required("enable_env_hygiene", default=options["enable_env_hygiene"]): bool,
+                    vol.Required("scan_interval", default=options["scan_interval"]): vol.In(["disabled", "daily", "weekly"]),
+                    vol.Required("max_file_size_kb", default=options["max_file_size_kb"]): int,
+                    vol.Required("max_total_scan_mb", default=options["max_total_scan_mb"]): int,
+                    vol.Required("max_findings", default=options["max_findings"]): int,
+                })
+                return self.async_show_form(step_id="init", data_schema=schema)
             except Exception:
-                _LOGGER.exception("Options flow schema build failed")
-                # Show a minimal fallback form instead of 500.
-                return self.async_show_form(
-                    step_id="init",
-                    data_schema=vol.Schema({}),
-                    errors={"base": "unknown"},
-                )
+                _LOGGER.exception("Options flow failed")
+                return self.async_show_form(step_id="init", data_schema=vol.Schema({}))
 
-        # Sanitize types
-        cleaned = {**options, **user_input}
-        cleaned["max_file_size_kb"] = int(cleaned["max_file_size_kb"])
-        cleaned["max_total_scan_mb"] = int(cleaned["max_total_scan_mb"])
-        cleaned["max_findings"] = int(cleaned["max_findings"])
-        cleaned["include_paths"] = list(cleaned.get("include_paths") or [])
-        cleaned["exclude_paths"] = list(cleaned.get("exclude_paths") or [])
-
-        return self.async_create_entry(title="", data=cleaned)
+        return self.async_create_entry(title="", data={**options, **user_input})
