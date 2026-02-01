@@ -2,8 +2,13 @@
 
 ![SecretSentry](logo.png)
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?style=for-the-badge&logo=buy-me-a-coffee)](https://buymeacoffee.com/printforge)
+[![Add to Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=HallyAus&repository=SecretSentry&category=integration)
+
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+🛰️ *Like free internet? [Get one free month of Starlink!](https://starlink.com/residential?referral=RC-2455784-77014-69&app_source=share)*
 
 **Local security scanner for Home Assistant configurations.**
 
