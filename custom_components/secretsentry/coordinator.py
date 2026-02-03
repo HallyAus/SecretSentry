@@ -168,6 +168,7 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
         self._config_path = hass.config.path()
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._previous_fingerprints: set[str] = set()
+        self._last_group_fingerprints: set[str] = set()  # Track repair issue IDs
         self._loaded_state = False
 
     async def _async_update_data(self) -> SecretSentryData:
@@ -284,15 +285,18 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
         # Get current grouped fingerprints
         current_group_fps = set(grouped.keys())
 
-        # Track which old fingerprints we've seen for migration
-        if not hasattr(self, "_last_group_fingerprints"):
-            self._last_group_fingerprints: set[str] = set()
-
         # New groups to create issues for
         new_group_fps = current_group_fps - self._last_group_fingerprints
 
         # Resolved groups to delete issues for
         resolved_group_fps = self._last_group_fingerprints - current_group_fps
+
+        _LOGGER.debug(
+            "Repairs update: %d current, %d new, %d resolved",
+            len(current_group_fps),
+            len(new_group_fps),
+            len(resolved_group_fps),
+        )
 
         # Privacy mode for descriptions
         privacy_mode = self.config_entry.options.get("privacy_mode_reports", True)
@@ -394,9 +398,13 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
             if stored and isinstance(stored, dict):
                 fingerprints = stored.get("fingerprints", [])
                 self._previous_fingerprints = set(fingerprints)
+                # Load repair issue fingerprints for proper cleanup
+                repair_fps = stored.get("repair_fingerprints", [])
+                self._last_group_fingerprints = set(repair_fps)
                 _LOGGER.debug(
-                    "Loaded %d previous fingerprints from storage",
-                    len(self._previous_fingerprints)
+                    "Loaded %d previous fingerprints and %d repair issues from storage",
+                    len(self._previous_fingerprints),
+                    len(self._last_group_fingerprints),
                 )
         except Exception as err:
             _LOGGER.warning("Failed to load state: %s", err)
@@ -414,6 +422,7 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
         try:
             state = {
                 "fingerprints": list(data.scan_result.fingerprints),
+                "repair_fingerprints": list(self._last_group_fingerprints),
                 "counts": {
                     "high": data.high_count,
                     "med": data.med_count,

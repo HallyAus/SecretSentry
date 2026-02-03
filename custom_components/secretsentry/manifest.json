@@ -6,7 +6,7 @@
   "documentation": "https://github.com/secretsentry/secretsentry",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/secretsentry/secretsentry/issues",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "requirements": [],
   "dependencies": [],
   "integration_type": "service"
