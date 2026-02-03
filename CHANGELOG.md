@@ -5,6 +5,22 @@ All notable changes to SecretSentry will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.6] - 2025-02-03
+
+### Added
+
+- **Options Menu**: New menu-based options flow with:
+  - **Configure Settings**: Access all configuration options
+  - **Scan Now**: Trigger an immediate security scan from the UI
+  - **Clear All Repairs**: Remove all SecretSentry repair issues (useful for stuck issues)
+
+### Fixed
+
+- **Repair Persistence**: Fixed issue where resolved findings weren't removed from Repairs dashboard
+  - Now persists repair fingerprints to storage
+  - Properly cleans up resolved issues after rescan
+- **Config Flow 500 Error**: Fixed OptionsFlow config_entry property conflict in modern HA versions
+
 ## [3.0.0] - 2024-01-XX
 
 ### Added
