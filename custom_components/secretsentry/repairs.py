@@ -11,9 +11,14 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
+
+# Try new location first, fall back to old
+try:
+    from homeassistant.helpers.issue_registry import RepairsFlow
+except ImportError:
+    from homeassistant.components.repairs import RepairsFlow
 
 from .const import RuleID, Severity
 

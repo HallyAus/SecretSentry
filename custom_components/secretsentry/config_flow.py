@@ -100,10 +100,7 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
     async def async_step_clear_repairs(self, user_input: dict[str, Any] | None = None):
         """Clear all SecretSentry repair issues."""
         # Lazy import to avoid load-time errors
-        try:
-            from homeassistant.helpers import issue_registry as ir
-        except ImportError:
-            from homeassistant.components.repairs import issue_registry as ir
+        from homeassistant.helpers import issue_registry as ir
 
         if user_input is None:
             # Count current repairs
