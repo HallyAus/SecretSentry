@@ -13,7 +13,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "SecretSentry Options",
+        "title": "SecretSentry",
+        "description": "What would you like to do?",
+        "menu_options": {
+          "settings": "Configure Settings",
+          "scan_now": "Scan Now",
+          "clear_repairs": "Clear All Repairs"
+        }
+      },
+      "settings": {
+        "title": "SecretSentry Settings",
         "description": "Configure scanning options for SecretSentry.",
         "data": {
           "scan_interval": "Automatic Scan Interval",
@@ -23,7 +32,10 @@
           "enable_external_url_self_check": "Enable external URL self-check",
           "privacy_mode_reports": "Privacy mode for reports",
           "enable_env_hygiene": "Environment file hygiene checks",
-          "enable_log_scan": "Scan log files for secrets"
+          "enable_log_scan": "Scan log files for secrets",
+          "max_file_size_kb": "Maximum file size (KB)",
+          "max_total_scan_mb": "Maximum total scan size (MB)",
+          "max_findings": "Maximum findings"
         },
         "data_description": {
           "scan_interval": "How often to automatically scan for security issues",
@@ -35,6 +47,14 @@
           "enable_env_hygiene": "Scan .env and docker-compose.yml files for secrets",
           "enable_log_scan": "Scan Home Assistant log files for leaked secrets (may be slow for large logs)"
         }
+      },
+      "scan_now": {
+        "title": "Scan Now",
+        "description": "Click Submit to trigger an immediate security scan."
+      },
+      "clear_repairs": {
+        "title": "Clear All Repairs",
+        "description": "This will remove all {count} SecretSentry repair issues from the Repairs dashboard.\n\nNote: Issues will reappear on the next scan if the underlying problems still exist."
       },
       "external_url": {
         "title": "External URL Configuration",
@@ -67,6 +87,10 @@
           "max_findings": "Maximum findings"
         }
       }
+    },
+    "abort": {
+      "scan_triggered": "Scan has been triggered. Check the sensor for results.",
+      "repairs_cleared": "All SecretSentry repair issues have been cleared."
     },
     "error": {
       "invalid_url": "Invalid URL format. Please enter a valid URL.",
