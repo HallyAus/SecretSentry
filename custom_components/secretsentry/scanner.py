@@ -298,28 +298,35 @@ class SecretSentryScanner:
         Returns:
             Initialized ScanContext.
         """
-        # Load secrets.yaml
+        # Load secrets.yaml from multiple locations
         secrets_map: dict[str, str] = {}
         secrets_raw_hashes: dict[str, str] = {}
 
-        secrets_path = self.config_path / "secrets.yaml"
-        if secrets_path.exists():
-            try:
-                import yaml
+        # List of secrets.yaml locations to check
+        secrets_paths = [
+            self.config_path / "secrets.yaml",
+            self.config_path / "esphome" / "secrets.yaml",
+        ]
 
-                content = secrets_path.read_text(encoding="utf-8")
-                parsed = yaml.safe_load(content)
-                if isinstance(parsed, dict):
-                    for key, value in parsed.items():
-                        if isinstance(value, str):
-                            # Store masked version and hash only
-                            secrets_map[key] = mask_secret(value)
-                            secrets_raw_hashes[key] = hash_for_comparison(value)
-                        else:
-                            secrets_map[key] = str(type(value))
-            except Exception as err:
-                _LOGGER.warning("Failed to load secrets.yaml: %s", err)
-                self._errors.append(f"Failed to load secrets.yaml: {err}")
+        for secrets_path in secrets_paths:
+            if secrets_path.exists():
+                try:
+                    import yaml
+
+                    content = secrets_path.read_text(encoding="utf-8")
+                    parsed = yaml.safe_load(content)
+                    if isinstance(parsed, dict):
+                        for key, value in parsed.items():
+                            if isinstance(value, str):
+                                # Store masked version and hash only
+                                secrets_map[key] = mask_secret(value)
+                                secrets_raw_hashes[key] = hash_for_comparison(value)
+                            else:
+                                secrets_map[key] = str(type(value))
+                    _LOGGER.debug("Loaded secrets from %s", secrets_path)
+                except Exception as err:
+                    _LOGGER.warning("Failed to load %s: %s", secrets_path, err)
+                    self._errors.append(f"Failed to load {secrets_path}: {err}")
 
         # Load .gitignore
         gitignore_text: str | None = None

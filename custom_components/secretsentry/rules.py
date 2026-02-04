@@ -219,8 +219,8 @@ class R001InlineSecretKey(Rule):
         """Detect sensitive keys with hardcoded values."""
         findings: list[Finding] = []
 
-        # Skip secrets.yaml itself
-        if file_path == "secrets.yaml":
+        # Skip secrets.yaml files (both main and ESPHome)
+        if file_path == "secrets.yaml" or file_path.endswith("/secrets.yaml"):
             return findings
 
         try:
@@ -342,7 +342,7 @@ class R002JWTDetected(Rule):
         findings: list[Finding] = []
 
         # Skip secrets.yaml
-        if file_path == "secrets.yaml":
+        if file_path == "secrets.yaml" or file_path.endswith("/secrets.yaml"):
             return findings
 
         try:
@@ -585,7 +585,7 @@ class R008URLUserinfo(Rule):
         findings: list[Finding] = []
 
         # Skip secrets.yaml
-        if file_path == "secrets.yaml":
+        if file_path == "secrets.yaml" or file_path.endswith("/secrets.yaml"):
             return findings
 
         try:
@@ -1326,7 +1326,8 @@ class R060SecretAge(Rule):
         if not context.options.get("enable_secret_age"):
             return []
 
-        if file_path != "secrets.yaml":
+        # Only check secrets.yaml files
+        if file_path != "secrets.yaml" and not file_path.endswith("/secrets.yaml"):
             return []
 
         findings: list[Finding] = []
