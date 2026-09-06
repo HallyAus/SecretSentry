@@ -138,7 +138,7 @@ class ScanResult:
             },
             "findings": [f.to_dict() for f in self.findings],
             "secret_inventory": self.secret_inventory,
-            "errors": self.errors[:10],  # Limit errors in export
+            "errors": self.errors[:10],
         }
 
 
@@ -150,39 +150,22 @@ class SecretSentryScanner:
         config_path: str,
         options: dict[str, Any] | None = None,
     ) -> None:
-        """Initialize the scanner.
-
-        Args:
-            config_path: Path to the Home Assistant config directory.
-            options: Scanner options from config entry.
-        """
+        """Initialize the scanner."""
         self.config_path = Path(config_path)
         self.options = options or {}
         self._rules = get_all_rules()
-        self._log_rule = R080LogContainsSecret()  # v3.0: dedicated log rule
+        self._log_rule = R080LogContainsSecret()
         self._errors: list[str] = []
 
     def scan(
         self,
         last_fingerprints: set[str] | None = None,
     ) -> ScanResult:
-        """Run the security scan.
-
-        This method should be called from an executor.
-
-        Args:
-            last_fingerprints: Fingerprints from previous scan for delta.
-
-        Returns:
-            ScanResult with all findings.
-        """
+        """Run the security scan."""
         start_time = datetime.now()
         self._errors = []
-
-        # Initialize context
         context = self._create_context(last_fingerprints or set())
 
-        # Collect all findings
         findings: list[Finding] = []
         scanned_files = 0
         scanned_bytes = 0
@@ -195,7 +178,6 @@ class SecretSentryScanner:
         ) * 1024 * 1024
         max_findings = self.options.get("max_findings", DEFAULT_MAX_FINDINGS)
 
-        # Scan regular files
         for file_path in self._get_scannable_files():
             if len(findings) >= max_findings:
                 _LOGGER.warning(
@@ -219,12 +201,9 @@ class SecretSentryScanner:
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
                 lines = content.splitlines()
 
-                # Run each rule on the file
                 for rule in self._rules:
                     try:
-                        rule_findings = rule.evaluate_file_text(
-                            rel_path, lines, context
-                        )
+                        rule_findings = rule.evaluate_file_text(rel_path, lines, context)
                         findings.extend(rule_findings)
                     except Exception as err:
                         _LOGGER.debug(
@@ -241,22 +220,18 @@ class SecretSentryScanner:
             except Exception as err:
                 _LOGGER.debug("Unexpected error scanning %s: %s", file_path, err)
 
-        # v3.0: Scan environment files if enabled
         if self.options.get(CONF_ENABLE_ENV_HYGIENE, DEFAULT_ENABLE_ENV_HYGIENE):
             env_findings = self._scan_env_files(context, max_findings - len(findings))
             findings.extend(env_findings)
 
-        # Scan archives if enabled
         if self.options.get("enable_snapshot_scan"):
             archive_findings = self._scan_archives(context, max_findings - len(findings))
             findings.extend(archive_findings)
 
-        # v3.0: Scan logs if enabled
         if self.options.get(CONF_ENABLE_LOG_SCAN, DEFAULT_ENABLE_LOG_SCAN):
             log_findings = self._scan_logs(context, max_findings - len(findings))
             findings.extend(log_findings)
 
-        # Run context-level evaluations
         for rule in self._rules:
             try:
                 context_findings = rule.evaluate_context(context)
@@ -264,9 +239,7 @@ class SecretSentryScanner:
             except Exception as err:
                 _LOGGER.debug("Rule %s context error: %s", rule.id, err)
 
-        # Build secret inventory
         secret_inventory = self._build_secret_inventory(context)
-
         end_time = datetime.now()
         scan_duration = (end_time - start_time).total_seconds()
 
@@ -290,38 +263,52 @@ class SecretSentryScanner:
         self,
         last_fingerprints: set[str],
     ) -> ScanContext:
-        """Create the scan context.
+        """Create the scan context and load every Home Assistant secret store.
 
-        Args:
-            last_fingerprints: Fingerprints from previous scan.
-
-        Returns:
-            Initialized ScanContext.
+        Home Assistant packages such as ESPHome can maintain a local secrets.yaml.
+        Treating only /config/secrets.yaml as authoritative creates false R004
+        findings, so all non-excluded secrets.yaml files contribute available keys.
+        Raw values are never retained: only masked values and comparison hashes are
+        stored in the scan context.
         """
-        # Load secrets.yaml
         secrets_map: dict[str, str] = {}
         secrets_raw_hashes: dict[str, str] = {}
 
-        secrets_path = self.config_path / "secrets.yaml"
-        if secrets_path.exists():
-            try:
-                import yaml
+        try:
+            import yaml
 
-                content = secrets_path.read_text(encoding="utf-8")
-                parsed = yaml.safe_load(content)
-                if isinstance(parsed, dict):
+            for secrets_path in self.config_path.rglob("secrets.yaml"):
+                try:
+                    rel_path = secrets_path.relative_to(self.config_path)
+                except ValueError:
+                    continue
+
+                if any(part in DEFAULT_EXCLUDE_DIRS for part in rel_path.parts[:-1]):
+                    continue
+
+                try:
+                    content = secrets_path.read_text(encoding="utf-8")
+                    parsed = yaml.safe_load(content)
+                    if not isinstance(parsed, dict):
+                        continue
+
                     for key, value in parsed.items():
+                        key_str = str(key)
                         if isinstance(value, str):
-                            # Store masked version and hash only
-                            secrets_map[key] = mask_secret(value)
-                            secrets_raw_hashes[key] = hash_for_comparison(value)
+                            secrets_map.setdefault(key_str, mask_secret(value))
+                            secrets_raw_hashes.setdefault(
+                                key_str, hash_for_comparison(value)
+                            )
                         else:
-                            secrets_map[key] = str(type(value))
-            except Exception as err:
-                _LOGGER.warning("Failed to load secrets.yaml: %s", err)
-                self._errors.append(f"Failed to load secrets.yaml: {err}")
+                            secrets_map.setdefault(key_str, str(type(value)))
+                except Exception as err:
+                    rel_display = str(rel_path)
+                    _LOGGER.warning("Failed to load %s: %s", rel_display, err)
+                    self._errors.append(f"Failed to load {rel_display}: {err}")
+        except Exception as err:
+            _LOGGER.warning("Failed to enumerate secrets.yaml files: %s", err)
+            self._errors.append(f"Failed to enumerate secrets.yaml files: {err}")
 
-        # Load .gitignore
         gitignore_text: str | None = None
         gitignore_path = self.config_path / ".gitignore"
         if gitignore_path.exists():
@@ -341,16 +328,10 @@ class SecretSentryScanner:
         )
 
     def _get_scannable_files(self) -> Generator[Path, None, None]:
-        """Get all files that should be scanned.
-
-        Yields:
-            Path objects for each file to scan.
-        """
-        # Get custom include/exclude paths
+        """Get all files that should be scanned."""
         include_paths = self.options.get("include_paths", [])
         exclude_paths = self.options.get("exclude_paths", [])
 
-        # Combine with defaults
         exclude_dirs = set(DEFAULT_EXCLUDE_DIRS)
         for path in exclude_paths:
             exclude_dirs.add(path)
@@ -363,21 +344,23 @@ class SecretSentryScanner:
                 return True
 
             parts = rel_path.parts
-
-            # Check directory exclusions
-            for part in parts[:-1]:  # Check parent dirs
+            for part in parts[:-1]:
                 if part in exclude_dirs:
                     return True
 
-            # Check file pattern exclusions
             filename = path.name
+
+            # secrets.yaml is intentionally a secret store, not an inline-secret
+            # leak source. Its keys are loaded separately into the scan context.
+            if filename.lower() == "secrets.yaml":
+                return True
+
             for pattern in DEFAULT_EXCLUDE_PATTERNS:
                 if fnmatch.fnmatch(filename, pattern):
                     return True
 
             return False
 
-        # Scan based on include paths or default to config root
         scan_roots = [self.config_path]
         if include_paths:
             scan_roots = [
@@ -391,7 +374,8 @@ class SecretSentryScanner:
                 continue
 
             if scan_root.is_file():
-                yield scan_root
+                if not should_skip(scan_root):
+                    yield scan_root
                 continue
 
             try:
@@ -402,7 +386,6 @@ class SecretSentryScanner:
                     if should_skip(path):
                         continue
 
-                    # Check extension
                     suffix = path.suffix.lower()
                     if suffix not in SCANNABLE_EXTENSIONS:
                         continue
@@ -418,17 +401,7 @@ class SecretSentryScanner:
         context: ScanContext,
         max_findings: int,
     ) -> list[Finding]:
-        """Scan environment files (.env, docker-compose.yml).
-
-        v3.0: Added environment hygiene checks.
-
-        Args:
-            context: Scan context.
-            max_findings: Maximum findings to return.
-
-        Returns:
-            List of findings from env files.
-        """
+        """Scan environment files (.env, docker-compose.yml)."""
         findings: list[Finding] = []
         env_files = self.options.get(CONF_ENV_FILES, DEFAULT_ENV_FILES)
 
@@ -445,7 +418,6 @@ class SecretSentryScanner:
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
                 lines = content.splitlines()
 
-                # Run rules on env file
                 for rule in self._rules:
                     if len(findings) >= max_findings:
                         break
@@ -465,17 +437,7 @@ class SecretSentryScanner:
         context: ScanContext,
         max_findings: int,
     ) -> list[Finding]:
-        """Scan log files for secrets (v3.0).
-
-        Streams lines to avoid loading entire log into memory.
-
-        Args:
-            context: Scan context.
-            max_findings: Maximum findings to return.
-
-        Returns:
-            List of findings from log files.
-        """
+        """Scan log files for secrets (v3.0)."""
         findings: list[Finding] = []
         log_paths = self.options.get(CONF_LOG_SCAN_PATHS, DEFAULT_LOG_SCAN_PATHS)
         max_log_mb = self.options.get(CONF_MAX_LOG_SCAN_MB, DEFAULT_MAX_LOG_SCAN_MB)
@@ -496,7 +458,6 @@ class SecretSentryScanner:
                     _LOGGER.debug("Log file %s exceeds max size, skipping", log_path)
                     continue
 
-                # Stream log file line by line
                 lines_read = 0
                 batch_lines: list[str] = []
                 batch_start_line = 1
@@ -511,12 +472,10 @@ class SecretSentryScanner:
                         lines_read += 1
                         batch_lines.append(line.rstrip("\n\r"))
 
-                        # Process in batches of 1000 lines
                         if len(batch_lines) >= 1000:
                             batch_findings = self._log_rule.evaluate_file_text(
                                 log_path, batch_lines, context
                             )
-                            # Adjust line numbers for batch
                             for bf in batch_findings:
                                 if bf.line:
                                     bf.line = batch_start_line + bf.line - 1
@@ -524,7 +483,6 @@ class SecretSentryScanner:
                             batch_start_line = line_num + 1
                             batch_lines = []
 
-                    # Process remaining lines
                     if batch_lines and len(findings) < max_findings:
                         batch_findings = self._log_rule.evaluate_file_text(
                             log_path, batch_lines, context
@@ -544,18 +502,9 @@ class SecretSentryScanner:
         context: ScanContext,
         max_findings: int,
     ) -> list[Finding]:
-        """Scan backup archives for secrets.
-
-        Args:
-            context: Scan context.
-            max_findings: Maximum findings to return.
-
-        Returns:
-            List of findings from archives.
-        """
+        """Scan backup archives for secrets."""
         findings: list[Finding] = []
 
-        # Look for archives in backup directories
         backup_dirs = ["backups", "backup"]
         for backup_dir in backup_dirs:
             backup_path = self.config_path / backup_dir
@@ -588,15 +537,7 @@ class SecretSentryScanner:
         archive_path: Path,
         context: ScanContext,
     ) -> list[Finding]:
-        """Scan a single archive file.
-
-        Args:
-            archive_path: Path to the archive.
-            context: Scan context.
-
-        Returns:
-            List of findings.
-        """
+        """Scan a single archive file."""
         findings: list[Finding] = []
         rel_archive = str(archive_path.relative_to(self.config_path))
         total_read = 0
@@ -607,7 +548,6 @@ class SecretSentryScanner:
             """Check archive member content for secrets."""
             lines = content.splitlines()
             for line_num, line in enumerate(lines, start=1):
-                # Check for JWT
                 if JWT_PATTERN.search(line):
                     findings.append(
                         Finding(
@@ -623,9 +563,8 @@ class SecretSentryScanner:
                             tags=["backup", "secrets"],
                         )
                     )
-                    return  # One finding per member is enough
+                    return
 
-                # Check for PEM
                 if PEM_BEGIN_PATTERN.search(line):
                     findings.append(
                         Finding(
@@ -643,7 +582,6 @@ class SecretSentryScanner:
                     )
                     return
 
-                # v3.0: Check for URL userinfo
                 if URL_USERINFO_PATTERN.search(line):
                     findings.append(
                         Finding(
@@ -674,7 +612,6 @@ class SecretSentryScanner:
                         if info.is_dir():
                             continue
 
-                        # Only check text-like files
                         name_lower = info.filename.lower()
                         if not any(name_lower.endswith(ext) for ext in SCANNABLE_EXTENSIONS):
                             continue
@@ -715,23 +652,14 @@ class SecretSentryScanner:
         return findings
 
     def _build_secret_inventory(self, context: ScanContext) -> dict[str, Any]:
-        """Build the secret inventory for reporting.
-
-        Args:
-            context: Scan context after scanning.
-
-        Returns:
-            Secret inventory dictionary.
-        """
+        """Build the secret inventory for reporting."""
         defined_keys = set(context.secrets_map.keys())
         used_keys = context.used_secret_keys
         unused_keys = defined_keys - used_keys
         missing_keys = used_keys - defined_keys
 
-        # Build blast radius (capped)
         blast_radius: dict[str, list[str]] = {}
         for key, locations in context.secret_usage_map.items():
-            # Cap at 10 locations per key
             blast_radius[key] = [f"{f}:{l}" for f, l in locations[:10]]
             if len(locations) > 10:
                 blast_radius[key].append(f"...and {len(locations) - 10} more")
@@ -749,31 +677,15 @@ def create_sanitised_copy(
     output_dir: str,
     options: dict[str, Any] | None = None,
 ) -> tuple[int, list[str]]:
-    """Create a sanitised copy of configuration files.
-
-    This replaces detected secrets with ***REDACTED***.
-    v3.0: Also redacts URL userinfo and applies privacy mode.
-
-    Args:
-        config_path: Path to the config directory.
-        output_dir: Path for the sanitised output.
-        options: Scanner options.
-
-    Returns:
-        Tuple of (files_processed, error_list).
-    """
+    """Create a sanitised copy of configuration files."""
     options = options or {}
     config_root = Path(config_path)
     output_root = Path(output_dir)
 
-    # v3.0: Initialize privacy tokenizer if privacy mode is on
     privacy_mode = options.get(CONF_PRIVACY_MODE_REPORTS, DEFAULT_PRIVACY_MODE_REPORTS)
     tokenizer = PrivacyTokenizer() if privacy_mode else None
-
-    # Create output directory
     output_root.mkdir(parents=True, exist_ok=True)
 
-    # Write warning README
     readme_content = """# SecretSentry Sanitised Configuration Copy
 
 **WARNING**: This directory contains a sanitised copy of your Home Assistant
@@ -791,16 +703,12 @@ Generated: {timestamp}
     files_processed = 0
     errors: list[str] = []
 
-    # Patterns to redact
     sensitive_patterns = [
-        # Key-value patterns
         (
             r'(\b(?:api_key|apikey|token|password|secret|bearer|authorization|client_secret|private_key|access_token|refresh_token|auth_token|webhook|mqtt_password|db_password|database_url|redis_password|mysql_password|postgres_password|encryption_key|jwt_secret)\s*[:=]\s*)["\']?([^"\'\s\n]+)["\']?',
             r'\1"***REDACTED***"',
         ),
-        # JWT tokens
         (r'eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+', '***REDACTED_JWT***'),
-        # Webhook IDs (partial)
         (r'(/api/webhook/)[A-Za-z0-9_-]{8,}', r'\1***REDACTED***'),
     ]
 
@@ -808,26 +716,17 @@ Generated: {timestamp}
         try:
             rel_path = file_path.relative_to(config_root)
             output_path = output_root / rel_path
-
-            # Create parent directories
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Read and sanitise content
             content = file_path.read_text(encoding="utf-8", errors="ignore")
-
-            # Apply redaction patterns
             sanitised = content
             for pattern, replacement in sensitive_patterns:
                 sanitised = re.sub(pattern, replacement, sanitised, flags=re.IGNORECASE)
 
-            # v3.0: Redact URL userinfo
             sanitised = redact_url_userinfo(sanitised)
-
-            # v3.0: Apply privacy mode if enabled
             if tokenizer:
                 sanitised = tokenizer.apply_privacy_mode(sanitised)
 
-            # Write sanitised file
             output_path.write_text(sanitised, encoding="utf-8")
             files_processed += 1
 
@@ -843,17 +742,7 @@ def export_report_with_privacy(
     scan_result: ScanResult,
     options: dict[str, Any],
 ) -> dict[str, Any]:
-    """Export scan result with privacy mode applied.
-
-    v3.0: New function for privacy-aware exports.
-
-    Args:
-        scan_result: The scan result to export.
-        options: Options including privacy_mode_reports.
-
-    Returns:
-        Dictionary ready for JSON export.
-    """
+    """Export scan result with privacy mode applied."""
     result_dict = scan_result.to_dict()
 
     privacy_mode = options.get(CONF_PRIVACY_MODE_REPORTS, DEFAULT_PRIVACY_MODE_REPORTS)
