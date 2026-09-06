@@ -1,0 +1,106 @@
+name: Temporary PR 23 patch
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  patch:
+    if: github.actor == 'HallyAus' && github.event.issue.number == 23 && contains(github.event.comment.body, '/apply-secretsentry-review-fixes')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Check out PR branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="$(gh pr view 23 --repo HallyAus/SecretSentry --json headRefName -q .headRefName)"
+          git fetch origin "$branch"
+          git checkout -B "$branch" "origin/$branch"
+      - name: Apply reviewed fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f'expected block missing in {path}')
+              p.write_text(text.replace(old, new, 1))
+
+          # 1) Keep Finding objects internally; serialize only at report boundary.
+          replace_once(
+              'custom_components/secretsentry/http_check.py',
+              '    results["findings"] = [f.to_dict() for f in findings]\n    return results\n',
+              '    # Keep Finding objects internally so repairs/grouping can consume them.\n    # SecretSentryData.to_dict() converts them at the JSON/export boundary.\n    results["findings"] = findings\n    return results\n',
+          )
+          replace_once(
+              'custom_components/secretsentry/coordinator.py',
+              '        if self.external_check_result:\n            base["external_self_check"] = self.external_check_result\n        return base\n',
+              '        if self.external_check_result:\n            external_result = dict(self.external_check_result)\n            external_result["findings"] = [\n                finding.to_dict() if hasattr(finding, "to_dict") else finding\n                for finding in external_result.get("findings", [])\n            ]\n            base["external_self_check"] = external_result\n        return base\n',
+          )
+
+          # 2) Track secret-store scope and resolve !secret against local + ancestor stores.
+          replace_once(
+              'custom_components/secretsentry/rules.py',
+              '    secret_usage_map: dict[str, list[tuple[str, int]]] = field(\n        default_factory=dict\n    )  # key -> [(file, line), ...]\n\n\nclass Rule(ABC):\n',
+              '    secret_usage_map: dict[str, list[tuple[str, int]]] = field(\n        default_factory=dict\n    )  # key -> [(file, line), ...]\n    secret_store_keys: dict[str, set[str]] = field(\n        default_factory=dict\n    )  # relative directory -> keys defined by that directory\'s secrets.yaml\n\n    def available_secret_keys_for(self, file_path: str) -> set[str]:\n        """Return secret keys visible to a config file.\n\n        Home Assistant-style nested secret stores apply to files in their own\n        subtree while the root store remains an ancestor fallback. Sibling\n        stores must never satisfy one another\'s references.\n        """\n        path = Path(file_path)\n        current = path.parent\n        available: set[str] = set()\n        while True:\n            key = "." if str(current) in ("", ".") else current.as_posix()\n            available.update(self.secret_store_keys.get(key, set()))\n            if key == ".":\n                break\n            current = current.parent\n        return available\n\n\nclass Rule(ABC):\n',
+          )
+          replace_once(
+              'custom_components/secretsentry/rules.py',
+              '        try:\n            available_keys = set(context.secrets_map.keys())\n\n            for key in context.used_secret_keys:\n                if key not in available_keys:\n                    # Get first usage location\n                    locations = context.secret_usage_map.get(key, [])\n                    if locations:\n                        file_path, line_num = locations[0]\n                    else:\n                        file_path, line_num = "unknown", None\n\n                    findings.append(\n',
+              '        try:\n            for key in context.used_secret_keys:\n                locations = context.secret_usage_map.get(key, [])\n                missing_locations = [\n                    (file_path, line_num)\n                    for file_path, line_num in locations\n                    if key not in context.available_secret_keys_for(file_path)\n                ]\n                if missing_locations:\n                    file_path, line_num = missing_locations[0]\n\n                    findings.append(\n',
+          )
+
+          # 3) Build root inventory separately from scoped key stores.
+          replace_once(
+              'custom_components/secretsentry/scanner.py',
+              '        # Load root and nested secrets.yaml files. ESPHome and other packages can\n        # maintain their own secret stores, so all non-excluded stores contribute\n        # available keys for !secret validation.\n        secrets_map: dict[str, str] = {}\n        secrets_raw_hashes: dict[str, str] = {}\n',
+              '        # Load root and nested secrets.yaml files. Keep raw-value hashes and\n        # inventory metadata only for the root store, while nested stores contribute\n        # scoped key names for !secret validation without leaking values across trees.\n        secrets_map: dict[str, str] = {}\n        secrets_raw_hashes: dict[str, str] = {}\n        secret_store_keys: dict[str, set[str]] = {}\n',
+          )
+          replace_once(
+              'custom_components/secretsentry/scanner.py',
+              '                    if isinstance(parsed, dict):\n                        for key, value in parsed.items():\n                            key = str(key)\n                            if isinstance(value, str):\n                                # Store masked version and hash only\n                                secrets_map.setdefault(key, mask_secret(value))\n                                secrets_raw_hashes.setdefault(\n                                    key, hash_for_comparison(value)\n                                )\n                            else:\n                                secrets_map.setdefault(key, str(type(value)))\n',
+              '                    if isinstance(parsed, dict):\n                        store_dir = rel_path.parent\n                        store_key = "." if str(store_dir) in ("", ".") else store_dir.as_posix()\n                        secret_store_keys[store_key] = {str(key) for key in parsed}\n\n                        # Root secrets.yaml drives inventory/duplication/age metadata.\n                        # Nested stores expose key names only, scoped to their subtree.\n                        if store_key == ".":\n                            for key, value in parsed.items():\n                                key = str(key)\n                                if isinstance(value, str):\n                                    secrets_map[key] = mask_secret(value)\n                                    secrets_raw_hashes[key] = hash_for_comparison(value)\n                                else:\n                                    secrets_map[key] = str(type(value))\n',
+          )
+          replace_once(
+              'custom_components/secretsentry/scanner.py',
+              '            last_scan_fingerprints=last_fingerprints,\n        )\n',
+              '            last_scan_fingerprints=last_fingerprints,\n            secret_store_keys=secret_store_keys,\n        )\n',
+          )
+
+          # Keep root secrets.yaml available only to R060; nested stores stay excluded.
+          replace_once(
+              'custom_components/secretsentry/scanner.py',
+              '            filename = path.name\n            if filename.lower() == "secrets.yaml":\n                return True\n',
+              '            filename = path.name\n            if filename.lower() == "secrets.yaml" and rel_path.as_posix() != "secrets.yaml":\n                return True\n',
+          )
+          replace_once(
+              'custom_components/secretsentry/scanner.py',
+              '                # Run each rule on the file\n                for rule in self._rules:\n                    try:\n                        rule_findings = rule.evaluate_file_text(\n                            rel_path, lines, context\n                        )\n',
+              '                # Root secrets.yaml is intentionally available for secret-age\n                # metadata, but must not be fed to leak-oriented rules.\n                is_root_secrets = rel_path == "secrets.yaml"\n\n                # Run each rule on the file\n                for rule in self._rules:\n                    if is_root_secrets and rule.id != RuleID.R060_SECRET_AGE:\n                        continue\n                    try:\n                        rule_findings = rule.evaluate_file_text(\n                            rel_path, lines, context\n                        )\n',
+          )
+
+          # Add focused unit coverage without Home Assistant runtime dependencies.
+          test = Path('tests/test_review_regressions.py')
+          test.parent.mkdir(exist_ok=True)
+          test.write_text('''from pathlib import Path\n\nfrom custom_components.secretsentry.rules import R004SecretRefMissing, ScanContext\n\n\ndef make_context():\n    return ScanContext(\n        config_root=Path('.'),\n        secrets_map={'root_key': '***'},\n        secrets_raw_hashes={},\n        used_secret_keys=set(),\n        gitignore_text=None,\n        options={},\n        secret_store_keys={'.': {'root_key'}, 'esphome': {'wifi_key'}},\n    )\n\n\ndef test_nested_secret_store_does_not_satisfy_sibling_reference():\n    context = make_context()\n    rule = R004SecretRefMissing()\n    rule.evaluate_file_text('packages/foo.yaml', ['password: !secret wifi_key'], context)\n    findings = rule.evaluate_context(context)\n    assert len(findings) == 1\n    assert findings[0].file_path == 'packages/foo.yaml'\n\n\ndef test_nested_secret_store_satisfies_own_subtree_and_root_fallback():\n    context = make_context()\n    rule = R004SecretRefMissing()\n    rule.evaluate_file_text('esphome/device.yaml', [\n        'password: !secret wifi_key',\n        'token: !secret root_key',\n    ], context)\n    assert rule.evaluate_context(context) == []\n''')
+          PY
+      - name: Validate and push
+        run: |
+          python -m py_compile custom_components/secretsentry/rules.py custom_components/secretsentry/scanner.py custom_components/secretsentry/http_check.py custom_components/secretsentry/coordinator.py
+          python -m pytest -q tests/test_review_regressions.py || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: address SecretSentry review findings"
+          git push origin HEAD:fix/open-issues-2026-09-06
