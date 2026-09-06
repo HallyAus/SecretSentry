@@ -222,9 +222,11 @@ ARCHIVE_EXTENSIONS: Final[tuple[str, ...]] = (
     ".zip",
 )
 
-# Directories to skip during scanning
+# Directories to skip during scanning. .cloud is Home Assistant/Nabu Casa managed
+# credential state; flagging it creates findings the user cannot safely remediate.
 DEFAULT_EXCLUDE_DIRS: Final[tuple[str, ...]] = (
     ".storage",
+    ".cloud",
     "deps",
     "tts",
     "www",
@@ -283,9 +285,11 @@ DEFAULT_OPTIONS: Final[dict[str, any]] = {
     "privacy_mode_reports": True,
     "enable_log_scan": False,
     "enable_env_hygiene": True,
+    "enable_external_url_self_check": False,
+    "external_url": "",
     "scan_interval": "daily",
     "include_paths": [],
-    "exclude_paths": [".storage", "deps", "tts", "www", "media", "backups", "backup", "logs", "__pycache__"],
+    "exclude_paths": [".storage", ".cloud", "deps", "tts", "www", "media", "backups", "backup", "logs", "__pycache__"],
     "max_file_size_kb": 512,
     "max_total_scan_mb": 50,
     "max_findings": 500,
