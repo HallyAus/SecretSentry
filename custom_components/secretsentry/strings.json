@@ -101,10 +101,18 @@
   },
   "entity": {
     "sensor": {
-      "total_findings": {"name": "Total Security Findings"},
-      "high_severity_findings": {"name": "High Severity Findings"},
-      "medium_severity_findings": {"name": "Medium Severity Findings"},
-      "low_severity_findings": {"name": "Low Severity Findings"}
+      "total_findings": {
+        "name": "Total Security Findings"
+      },
+      "high_severity_findings": {
+        "name": "High Severity Findings"
+      },
+      "medium_severity_findings": {
+        "name": "Medium Severity Findings"
+      },
+      "low_severity_findings": {
+        "name": "Low Severity Findings"
+      }
     }
   },
   "issues": {
@@ -124,7 +132,7 @@
     "r030": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
     "r040": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
     "r050": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
-    "r060": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r060": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
     "r070": {"title": "{title}", "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
     "r071": {"title": "{title}", "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
     "r080": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
@@ -133,5 +141,23 @@
     "r092": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
     "r093": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
     "summary": {"title": "{title}", "description": "{description}"}
+  },
+  "services": {
+    "scan_now": {
+      "name": "Scan Now",
+      "description": "Trigger an immediate security scan of the Home Assistant configuration."
+    },
+    "export_report": {
+      "name": "Export Report",
+      "description": "Export a masked JSON report of all findings to /config/secretsentry_report.json. If privacy mode is enabled, IPs and hostnames will also be tokenized."
+    },
+    "export_sanitised_copy": {
+      "name": "Export Sanitised Copy",
+      "description": "Create a sanitised copy of configuration files with secrets replaced by ***REDACTED***. URLs with credentials are also redacted."
+    },
+    "run_selftest": {
+      "name": "Run Self-Test",
+      "description": "Run internal self-tests to verify the scanner is working correctly. Tests all rules, masking, and export functionality."
+    }
   }
 }
