@@ -30,6 +30,7 @@
           "enable_git_subprocess_checks": "Enable git subprocess checks",
           "enable_secret_age": "Check secret age metadata",
           "enable_external_url_self_check": "Enable external URL self-check",
+          "external_url": "Your external URL",
           "privacy_mode_reports": "Privacy mode for reports",
           "enable_env_hygiene": "Environment file hygiene checks",
           "enable_log_scan": "Scan log files for secrets",
@@ -43,6 +44,7 @@
           "enable_git_subprocess_checks": "Run git commands to check if secrets.yaml is tracked (requires git)",
           "enable_secret_age": "Check for old secrets based on date comments in secrets.yaml",
           "enable_external_url_self_check": "Check YOUR OWN external URL for security issues",
+          "external_url": "Required when the external URL self-check is enabled (for example, https://myhome.example.com)",
           "privacy_mode_reports": "Mask private IPs and tokenize hostnames in exported reports",
           "enable_env_hygiene": "Scan .env and docker-compose.yml files for secrets",
           "enable_log_scan": "Scan Home Assistant log files for leaked secrets (may be slow for large logs)"
@@ -99,138 +101,37 @@
   },
   "entity": {
     "sensor": {
-      "total_findings": {
-        "name": "Total Security Findings"
-      },
-      "high_severity_findings": {
-        "name": "High Severity Findings"
-      },
-      "medium_severity_findings": {
-        "name": "Medium Severity Findings"
-      },
-      "low_severity_findings": {
-        "name": "Low Severity Findings"
-      }
+      "total_findings": {"name": "Total Security Findings"},
+      "high_severity_findings": {"name": "High Severity Findings"},
+      "medium_severity_findings": {"name": "Medium Severity Findings"},
+      "low_severity_findings": {"name": "Low Severity Findings"}
     }
   },
   "issues": {
-    "r001": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r002": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r003": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r004": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r005": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r008": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r010": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r011": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r012": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r020": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r021": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r022": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r023": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r030": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r040": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r050": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r060": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r070": {
-      "title": "{title}",
-      "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r071": {
-      "title": "{title}",
-      "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r080": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r090": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r091": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r092": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "r093": {
-      "title": "{title}",
-      "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"
-    },
-    "summary": {
-      "title": "{title}",
-      "description": "{description}"
-    }
-  },
-  "services": {
-    "scan_now": {
-      "name": "Scan Now",
-      "description": "Trigger an immediate security scan of the Home Assistant configuration."
-    },
-    "export_report": {
-      "name": "Export Report",
-      "description": "Export a masked JSON report of all findings to /config/secretsentry_report.json. If privacy mode is enabled, IPs and hostnames will also be tokenized."
-    },
-    "export_sanitised_copy": {
-      "name": "Export Sanitised Copy",
-      "description": "Create a sanitised copy of configuration files with secrets replaced by ***REDACTED***. URLs with credentials are also redacted."
-    },
-    "run_selftest": {
-      "name": "Run Self-Test",
-      "description": "Run internal self-tests to verify the scanner is working correctly. Tests all rules, masking, and export functionality."
-    }
+    "r001": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r002": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r003": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r004": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r005": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r008": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r010": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r011": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r012": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r020": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r021": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r022": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r023": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r030": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r040": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r050": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r060": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r070": {"title": "{title}", "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r071": {"title": "{title}", "description": "{description}\n\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r080": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r090": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r091": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r092": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Line:** {line}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "r093": {"title": "{title}", "description": "{description}\n\n**File:** {file_path}\n**Evidence:** {evidence}\n\n**Recommendation:** {recommendation}"},
+    "summary": {"title": "{title}", "description": "{description}"}
   }
 }
