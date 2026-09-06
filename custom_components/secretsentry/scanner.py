@@ -298,28 +298,45 @@ class SecretSentryScanner:
         Returns:
             Initialized ScanContext.
         """
-        # Load secrets.yaml
+        # Load root and nested secrets.yaml files. ESPHome and other packages can
+        # maintain their own secret stores, so all non-excluded stores contribute
+        # available keys for !secret validation.
         secrets_map: dict[str, str] = {}
         secrets_raw_hashes: dict[str, str] = {}
 
-        secrets_path = self.config_path / "secrets.yaml"
-        if secrets_path.exists():
-            try:
-                import yaml
+        try:
+            import yaml
 
-                content = secrets_path.read_text(encoding="utf-8")
-                parsed = yaml.safe_load(content)
-                if isinstance(parsed, dict):
-                    for key, value in parsed.items():
-                        if isinstance(value, str):
-                            # Store masked version and hash only
-                            secrets_map[key] = mask_secret(value)
-                            secrets_raw_hashes[key] = hash_for_comparison(value)
-                        else:
-                            secrets_map[key] = str(type(value))
-            except Exception as err:
-                _LOGGER.warning("Failed to load secrets.yaml: %s", err)
-                self._errors.append(f"Failed to load secrets.yaml: {err}")
+            for secrets_path in self.config_path.rglob("secrets.yaml"):
+                try:
+                    rel_path = secrets_path.relative_to(self.config_path)
+                    if any(
+                        part in DEFAULT_EXCLUDE_DIRS
+                        for part in rel_path.parts[:-1]
+                    ):
+                        continue
+
+                    content = secrets_path.read_text(encoding="utf-8")
+                    parsed = yaml.safe_load(content)
+                    if isinstance(parsed, dict):
+                        for key, value in parsed.items():
+                            key = str(key)
+                            if isinstance(value, str):
+                                # Store masked version and hash only
+                                secrets_map.setdefault(key, mask_secret(value))
+                                secrets_raw_hashes.setdefault(
+                                    key, hash_for_comparison(value)
+                                )
+                            else:
+                                secrets_map.setdefault(key, str(type(value)))
+                except Exception as err:
+                    _LOGGER.warning("Failed to load %s: %s", secrets_path, err)
+                    self._errors.append(
+                        f"Failed to load {secrets_path.name}: {err}"
+                    )
+        except Exception as err:
+            _LOGGER.warning("Failed to enumerate secrets.yaml files: %s", err)
+            self._errors.append(f"Failed to enumerate secrets.yaml files: {err}")
 
         # Load .gitignore
         gitignore_text: str | None = None
@@ -369,8 +386,14 @@ class SecretSentryScanner:
                 if part in exclude_dirs:
                     return True
 
-            # Check file pattern exclusions
+            # secrets.yaml files are intentionally secret stores. Their keys are
+            # loaded separately into the scan context, while their raw values must
+            # not be treated as inline leaks.
             filename = path.name
+            if filename.lower() == "secrets.yaml":
+                return True
+
+            # Check file pattern exclusions
             for pattern in DEFAULT_EXCLUDE_PATTERNS:
                 if fnmatch.fnmatch(filename, pattern):
                     return True
@@ -391,7 +414,8 @@ class SecretSentryScanner:
                 continue
 
             if scan_root.is_file():
-                yield scan_root
+                if not should_skip(scan_root):
+                    yield scan_root
                 continue
 
             try:
