@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, OptionsFlow, ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 
-_LOGGER = logging.getLogger(__name__)
+from .const import CONF_ENABLE_EXTERNAL_CHECK, CONF_EXTERNAL_URL, DOMAIN
 
-DOMAIN = "secretsentry"
+_LOGGER = logging.getLogger(__name__)
 
 
 class SecretSentryConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -52,6 +53,8 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
             "privacy_mode_reports": True,
             "enable_log_scan": False,
             "enable_env_hygiene": True,
+            CONF_ENABLE_EXTERNAL_CHECK: False,
+            CONF_EXTERNAL_URL: "",
             "scan_interval": "daily",
             "max_file_size_kb": 512,
             "max_total_scan_mb": 50,
@@ -59,23 +62,45 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
         }
         options = {**defaults, **dict(self._entry.options or {})}
 
-        if user_input is None:
-            try:
-                schema = vol.Schema({
-                    vol.Required("privacy_mode_reports", default=options["privacy_mode_reports"]): bool,
-                    vol.Required("enable_log_scan", default=options["enable_log_scan"]): bool,
-                    vol.Required("enable_env_hygiene", default=options["enable_env_hygiene"]): bool,
-                    vol.Required("scan_interval", default=options["scan_interval"]): vol.In(["disabled", "daily", "weekly"]),
-                    vol.Required("max_file_size_kb", default=options["max_file_size_kb"]): int,
-                    vol.Required("max_total_scan_mb", default=options["max_total_scan_mb"]): int,
-                    vol.Required("max_findings", default=options["max_findings"]): int,
-                })
-                return self.async_show_form(step_id="settings", data_schema=schema)
-            except Exception:
-                _LOGGER.exception("Options flow failed")
-                return self.async_show_form(step_id="settings", data_schema=vol.Schema({}))
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            external_url = str(user_input.get(CONF_EXTERNAL_URL, "")).strip()
+            if user_input.get(CONF_ENABLE_EXTERNAL_CHECK):
+                parsed = urlparse(external_url)
+                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                    errors[CONF_EXTERNAL_URL] = "invalid_url"
+                else:
+                    user_input[CONF_EXTERNAL_URL] = external_url
 
-        return self.async_create_entry(title="", data={**options, **user_input})
+            if not errors:
+                return self.async_create_entry(title="", data={**options, **user_input})
+
+        try:
+            schema = vol.Schema({
+                vol.Required("privacy_mode_reports", default=options["privacy_mode_reports"]): bool,
+                vol.Required("enable_log_scan", default=options["enable_log_scan"]): bool,
+                vol.Required("enable_env_hygiene", default=options["enable_env_hygiene"]): bool,
+                vol.Required(
+                    CONF_ENABLE_EXTERNAL_CHECK,
+                    default=options[CONF_ENABLE_EXTERNAL_CHECK],
+                ): bool,
+                vol.Optional(
+                    CONF_EXTERNAL_URL,
+                    default=options[CONF_EXTERNAL_URL],
+                ): str,
+                vol.Required("scan_interval", default=options["scan_interval"]): vol.In(["disabled", "daily", "weekly"]),
+                vol.Required("max_file_size_kb", default=options["max_file_size_kb"]): int,
+                vol.Required("max_total_scan_mb", default=options["max_total_scan_mb"]): int,
+                vol.Required("max_findings", default=options["max_findings"]): int,
+            })
+            return self.async_show_form(
+                step_id="settings",
+                data_schema=schema,
+                errors=errors,
+            )
+        except Exception:
+            _LOGGER.exception("Options flow failed")
+            return self.async_show_form(step_id="settings", data_schema=vol.Schema({}))
 
     async def async_step_scan_now(self, user_input: dict[str, Any] | None = None):
         """Trigger an immediate scan."""

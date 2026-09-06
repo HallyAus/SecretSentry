@@ -124,6 +124,27 @@ class ScanContext:
     secret_usage_map: dict[str, list[tuple[str, int]]] = field(
         default_factory=dict
     )  # key -> [(file, line), ...]
+    secret_store_keys: dict[str, set[str]] = field(
+        default_factory=dict
+    )  # relative directory -> keys defined by that directory's secrets.yaml
+
+    def available_secret_keys_for(self, file_path: str) -> set[str]:
+        """Return secret keys visible to a config file.
+
+        Home Assistant-style nested secret stores apply to files in their own
+        subtree while the root store remains an ancestor fallback. Sibling
+        stores must never satisfy one another's references.
+        """
+        path = Path(file_path)
+        current = path.parent
+        available: set[str] = set()
+        while True:
+            key = "." if str(current) in ("", ".") else current.as_posix()
+            available.update(self.secret_store_keys.get(key, set()))
+            if key == ".":
+                break
+            current = current.parent
+        return available
 
 
 class Rule(ABC):
@@ -464,16 +485,15 @@ class R004SecretRefMissing(Rule):
         findings: list[Finding] = []
 
         try:
-            available_keys = set(context.secrets_map.keys())
-
             for key in context.used_secret_keys:
-                if key not in available_keys:
-                    # Get first usage location
-                    locations = context.secret_usage_map.get(key, [])
-                    if locations:
-                        file_path, line_num = locations[0]
-                    else:
-                        file_path, line_num = "unknown", None
+                locations = context.secret_usage_map.get(key, [])
+                missing_locations = [
+                    (file_path, line_num)
+                    for file_path, line_num in locations
+                    if key not in context.available_secret_keys_for(file_path)
+                ]
+                if missing_locations:
+                    file_path, line_num = missing_locations[0]
 
                     findings.append(
                         Finding(
