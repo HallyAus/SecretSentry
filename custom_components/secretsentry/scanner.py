@@ -219,8 +219,14 @@ class SecretSentryScanner:
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
                 lines = content.splitlines()
 
+                # Root secrets.yaml is intentionally available for secret-age
+                # metadata, but must not be fed to leak-oriented rules.
+                is_root_secrets = rel_path == "secrets.yaml"
+
                 # Run each rule on the file
                 for rule in self._rules:
+                    if is_root_secrets and rule.id != RuleID.R060_SECRET_AGE:
+                        continue
                     try:
                         rule_findings = rule.evaluate_file_text(
                             rel_path, lines, context
@@ -298,11 +304,12 @@ class SecretSentryScanner:
         Returns:
             Initialized ScanContext.
         """
-        # Load root and nested secrets.yaml files. ESPHome and other packages can
-        # maintain their own secret stores, so all non-excluded stores contribute
-        # available keys for !secret validation.
+        # Load root and nested secrets.yaml files. Keep raw-value hashes and
+        # inventory metadata only for the root store, while nested stores contribute
+        # scoped key names for !secret validation without leaking values across trees.
         secrets_map: dict[str, str] = {}
         secrets_raw_hashes: dict[str, str] = {}
+        secret_store_keys: dict[str, set[str]] = {}
 
         try:
             import yaml
@@ -319,16 +326,20 @@ class SecretSentryScanner:
                     content = secrets_path.read_text(encoding="utf-8")
                     parsed = yaml.safe_load(content)
                     if isinstance(parsed, dict):
-                        for key, value in parsed.items():
-                            key = str(key)
-                            if isinstance(value, str):
-                                # Store masked version and hash only
-                                secrets_map.setdefault(key, mask_secret(value))
-                                secrets_raw_hashes.setdefault(
-                                    key, hash_for_comparison(value)
-                                )
-                            else:
-                                secrets_map.setdefault(key, str(type(value)))
+                        store_dir = rel_path.parent
+                        store_key = "." if str(store_dir) in ("", ".") else store_dir.as_posix()
+                        secret_store_keys[store_key] = {str(key) for key in parsed}
+
+                        # Root secrets.yaml drives inventory/duplication/age metadata.
+                        # Nested stores expose key names only, scoped to their subtree.
+                        if store_key == ".":
+                            for key, value in parsed.items():
+                                key = str(key)
+                                if isinstance(value, str):
+                                    secrets_map[key] = mask_secret(value)
+                                    secrets_raw_hashes[key] = hash_for_comparison(value)
+                                else:
+                                    secrets_map[key] = str(type(value))
                 except Exception as err:
                     _LOGGER.warning("Failed to load %s: %s", secrets_path, err)
                     self._errors.append(
@@ -355,6 +366,7 @@ class SecretSentryScanner:
             gitignore_text=gitignore_text,
             options=self.options,
             last_scan_fingerprints=last_fingerprints,
+            secret_store_keys=secret_store_keys,
         )
 
     def _get_scannable_files(self) -> Generator[Path, None, None]:
@@ -390,7 +402,7 @@ class SecretSentryScanner:
             # loaded separately into the scan context, while their raw values must
             # not be treated as inline leaks.
             filename = path.name
-            if filename.lower() == "secrets.yaml":
+            if filename.lower() == "secrets.yaml" and rel_path.as_posix() != "secrets.yaml":
                 return True
 
             # Check file pattern exclusions

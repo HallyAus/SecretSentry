@@ -126,7 +126,12 @@ class SecretSentryData:
             "resolved_count": self.resolved_count,
         }
         if self.external_check_result:
-            base["external_self_check"] = self.external_check_result
+            external_result = dict(self.external_check_result)
+            external_result["findings"] = [
+                finding.to_dict() if hasattr(finding, "to_dict") else finding
+                for finding in external_result.get("findings", [])
+            ]
+            base["external_self_check"] = external_result
         return base
 
 
