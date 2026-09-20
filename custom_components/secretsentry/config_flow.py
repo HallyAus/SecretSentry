@@ -3,15 +3,24 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, OptionsFlow, ConfigEntry
+from .const import CONF_ENABLE_EXTERNAL_CHECK, CONF_EXTERNAL_URL
 from homeassistant.core import callback
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "secretsentry"
+
+def _is_valid_url(value: str) -> bool:
+    """Return True if the value is a valid http(s) URL."""
+    if not value:
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 class SecretSentryConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -38,6 +47,7 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self._entry = entry
+        self._pending_options: dict[str, Any] | None = None
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Show menu with options."""
@@ -52,6 +62,7 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
             "privacy_mode_reports": True,
             "enable_log_scan": False,
             "enable_env_hygiene": True,
+            "enable_external_url_self_check": False,
             "scan_interval": "daily",
             "max_file_size_kb": 512,
             "max_total_scan_mb": 50,
@@ -65,6 +76,7 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
                     vol.Required("privacy_mode_reports", default=options["privacy_mode_reports"]): bool,
                     vol.Required("enable_log_scan", default=options["enable_log_scan"]): bool,
                     vol.Required("enable_env_hygiene", default=options["enable_env_hygiene"]): bool,
+                    vol.Required(CONF_ENABLE_EXTERNAL_CHECK, default=options[CONF_ENABLE_EXTERNAL_CHECK]): bool,
                     vol.Required("scan_interval", default=options["scan_interval"]): vol.In(["disabled", "daily", "weekly"]),
                     vol.Required("max_file_size_kb", default=options["max_file_size_kb"]): int,
                     vol.Required("max_total_scan_mb", default=options["max_total_scan_mb"]): int,
@@ -75,7 +87,56 @@ class SecretSentryOptionsFlowHandler(OptionsFlow):
                 _LOGGER.exception("Options flow failed")
                 return self.async_show_form(step_id="settings", data_schema=vol.Schema({}))
 
-        return self.async_create_entry(title="", data={**options, **user_input})
+        options = {**options, **user_input}
+        if options.get(CONF_ENABLE_EXTERNAL_CHECK):
+            self._pending_options = options
+            return self.async_show_form(
+                step_id="external_url",
+                data_schema=vol.Schema({
+                    vol.Required(
+                        CONF_EXTERNAL_URL,
+                        default=options.get(CONF_EXTERNAL_URL) or "",
+                    ): str,
+                }),
+            )
+
+        options[CONF_EXTERNAL_URL] = ""
+        return self.async_create_entry(title="", data=options)
+
+    async def async_step_external_url(self, user_input: dict[str, Any] | None = None):
+        """Collect the external URL for the self-check."""
+        if user_input is None:
+            options = self._pending_options or {
+                **{CONF_ENABLE_EXTERNAL_CHECK: False, CONF_EXTERNAL_URL: ""},
+                **dict(self._entry.options or {}),
+            }
+            return self.async_show_form(
+                step_id="external_url",
+                data_schema=vol.Schema({
+                    vol.Required(
+                        CONF_EXTERNAL_URL,
+                        default=options.get(CONF_EXTERNAL_URL) or "",
+                    ): str,
+                }),
+            )
+
+        url = str(user_input.get(CONF_EXTERNAL_URL, "")).strip()
+        if not _is_valid_url(url):
+            return self.async_show_form(
+                step_id="external_url",
+                data_schema=vol.Schema({
+                    vol.Required(CONF_EXTERNAL_URL, default=url): str,
+                }),
+                errors={"base": "invalid_url"},
+            )
+
+        options = self._pending_options or {
+            **{CONF_ENABLE_EXTERNAL_CHECK: False, CONF_EXTERNAL_URL: ""},
+            **dict(self._entry.options or {}),
+        }
+        options[CONF_ENABLE_EXTERNAL_CHECK] = True
+        options[CONF_EXTERNAL_URL] = url
+        return self.async_create_entry(title="", data=options)
 
     async def async_step_scan_now(self, user_input: dict[str, Any] | None = None):
         """Trigger an immediate scan."""
