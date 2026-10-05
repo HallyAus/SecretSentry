@@ -147,5 +147,7 @@ async def check_external_url(
         _LOGGER.warning("External URL check error: %s", err)
         results["error"] = str(err)
 
-    results["findings"] = [f.to_dict() for f in findings]
+    # Keep Finding objects internally so repairs/grouping can consume them.
+    # SecretSentryData.to_dict() converts them at the JSON/export boundary.
+    results["findings"] = findings
     return results
