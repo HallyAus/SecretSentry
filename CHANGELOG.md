@@ -5,6 +5,16 @@ All notable changes to SecretSentry will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.8] - 2026-10-05
+
+### Fixed
+
+- ESPHome secrets are resolved from `esphome/secrets.yaml` and root secrets where applicable.
+- Application-managed `.cloud` credentials and non-log files no longer produce the reported false positives.
+- External URL self-check settings are available in the options flow.
+- The summary repair link points to this repository.
+- The integration manifest version matches this release.
+
 ## [3.0.6] - 2025-02-03
 
 ### Added
