@@ -357,7 +357,7 @@ class SecretSentryCoordinator(DataUpdateCoordinator[SecretSentryData]):
                     is_fixable=False,
                     is_persistent=True,
                     severity=ir.IssueSeverity.WARNING if data.high_count > 0 else ir.IssueSeverity.WARNING,
-                    learn_more_url="https://github.com/secretsentry/secretsentry",
+                    learn_more_url="https://github.com/HallyAus/SecretSentry",
                     translation_key="summary",
                     translation_placeholders={
                         "title": summary["title"],
