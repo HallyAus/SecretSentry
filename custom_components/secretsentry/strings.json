@@ -44,7 +44,7 @@
           "enable_git_subprocess_checks": "Run git commands to check if secrets.yaml is tracked (requires git)",
           "enable_secret_age": "Check for old secrets based on date comments in secrets.yaml",
           "enable_external_url_self_check": "Check YOUR OWN external URL for security issues",
-          "external_url": "Required when the external URL self-check is enabled (for example, https://myhome.example.com)",
+          "external_url": "Required when the external URL self-check is enabled.",
           "privacy_mode_reports": "Mask private IPs and tokenize hostnames in exported reports",
           "enable_env_hygiene": "Scan .env and docker-compose.yml files for secrets",
           "enable_log_scan": "Scan Home Assistant log files for leaked secrets (may be slow for large logs)"
@@ -65,7 +65,7 @@
           "external_url": "Your External URL"
         },
         "data_description": {
-          "external_url": "The external URL of YOUR Home Assistant instance (e.g., https://myhome.duckdns.org)"
+          "external_url": "The external URL of YOUR Home Assistant instance."
         }
       },
       "log_scan": {

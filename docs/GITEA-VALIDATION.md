@@ -14,3 +14,9 @@ Keep GitHub recovery visibility and Actions disabled. The public HACS credential
 validation and installed-consumer distribution path remain separate gates; a
 private candidate alone does not certify production installation or public
 release readiness. No new periodic schedule is inferred or enabled here.
+
+Run539 passed original regression tests, then refused manifest key ordering
+and literal example URLs in translation descriptions. Sort keys without
+changing values and keep the same help meaning without those examples.
+No runtime Python, authorization, account API, version or HACS minimum changes.
+Complete new workflow and exact private candidate proof remain required.
